@@ -1,0 +1,46 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(test_resolvo VERSION 1.0.0 LANGUAGES C CXX)
+
+set(TARGET ${PROJECT_NAME})
+set(CMAKE_C_STANDARD   11)
+set(CMAKE_C_STANDARD_REQUIRED true)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED true)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+
+set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_CXX_FLAGS  "-g -DTCL_THREADS -DPROJECT_VERSION=${PROJECT_VERSION} ${CMAKE_CXX_FLAGS}")
+
+add_executable(test_resolvo
+        src/tests/test_resolvo.cc
+        src/internal/Arena.h
+        src/internal/ArenaId.h
+        src/internal/NameId.h
+        src/internal/SolvableId.h
+        src/internal/StringId.h
+        src/internal/VersionSetId.h
+        src/Pool.h
+        src/Solvable.h
+        src/internal/ClauseId.h
+        src/solver/Solver.h
+        src/internal/LearntClauseId.h
+        src/internal/CandidatesId.h
+        src/internal/DependenciesId.h
+        src/solver/Clause.h
+        src/Problem.h
+        src/solver/WatchMap.h
+        src/solver/DecisionTracker.h
+        src/solver/Decision.h
+        src/solver/DecisionMap.h
+        src/solver/PropagationError.h
+        src/internal/FrozenCopyMap.h
+        src/solver/SolverCache.h
+        src/Common.h
+        src/Range.h
+        src/tests/solver.h
+        src/DisplayClause.h
+        src/DisplayName.h
+        src/DisplayDecisionMap.h
+        src/internal/Mapping.h
+        src/DisplayUnsat.h
+)

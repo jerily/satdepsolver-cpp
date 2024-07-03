@@ -1,4 +1,4 @@
-# resolvo-cpp
+# satdepsolver-cpp
 
 C++ port of [resolvo](https://github.com/mamba-org/resolvo).
 

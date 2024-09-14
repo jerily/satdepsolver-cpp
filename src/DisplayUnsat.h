@@ -69,8 +69,13 @@ public:
 
         if (!top_level_conflicts.empty()) {
             oss << "The following packages are incompatible" << std::endl;
-            fmt_graph(oss, top_level_conflicts, true);
+            try {
+                return fmt_graph(oss, top_level_conflicts, true);
+            } catch (std::exception &e) {
+                oss << "Error: " << e.what() << std::endl;
+            }
 
+            // Conflicts caused by locked dependencies
             auto edges = graph.graph.outgoing_edges(graph.root_node);
             auto indenter = Indenter(true);
 
@@ -262,15 +267,22 @@ public:
                                 << ", which cannot be installed because there are no viable options:" << std::endl;
                         }
 
-                        std::vector<EdgeIndex> filtered_edges;
-                        std::copy_if(edges.begin(), edges.end(), std::back_inserter(filtered_edges), [this](auto &edge) {
-                            return missing_set.find(graph.graph.edges.at(edge).get_node_to().get_id()) != missing_set.end();
-                        });
+                        //            let children: Vec<_> = edges
+                        //                            .iter()
+                        //                            .map(|&e| {
+                        //                                (
+                        //                                    DisplayOp::Candidate(graph.edge_endpoints(e).unwrap().1),
+                        //                                    indenter.push_level(),
+                        //                                )
+                        //                            })
+                        //                            .collect();
 
                         std::vector<std::pair<DisplayOpVariant, Indenter>> children;
-                        std::transform(filtered_edges.begin(), filtered_edges.end(), std::back_inserter(children), [this, &node_indenter_pair](auto &edge) {
+                        std::transform(edges.begin(), edges.end(), std::back_inserter(children), [this,&node_indenter_pair](auto &edge) {
                             return std::make_pair(DisplayOp::Candidate{graph.graph.edges.at(edge).get_node_to().get_id()}, node_indenter_pair.second.push_level());
                         });
+
+                        std::cout << "children size: " << children.size() << std::endl;
 
                         std::vector<std::pair<DisplayOpVariant, Indenter>> deduplicated_children;
                         std::unordered_set<SolvableId> merged_and_seen;
@@ -281,6 +293,9 @@ public:
                             }
                             auto child_node = std::get<DisplayOp::Candidate>(child.first);
                             auto child_node_index = child_node.node_index;
+
+                            std::cout << "child_node_index: " << child_node_index << std::endl;
+
                             auto payload = graph.graph.get_node(child_node_index).get_payload();
                             auto solvable_id = std::get<ProblemNode::Solvable>(payload).solvable;
                             auto merged = merged_candidates.find(solvable_id);
@@ -290,7 +305,7 @@ public:
                             }
 
                             if (merged != merged_candidates.end()) {
-                                for (auto &id : merged->second.ids) {
+                                for (auto &id: merged->second.ids) {
                                     merged_and_seen.insert(id);
                                 }
                             }
@@ -356,15 +371,22 @@ public:
                         }
                     }
 
-                    auto already_installed = std::any_of(graph.graph.outgoing_edges(node_index).begin(), graph.graph.outgoing_edges(node_index).end(), [](auto &edge) {
-                        return std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight()) && std::holds_alternative<ConflictCause::ForbidMultipleInstances>(std::get<ProblemEdge::Conflict>(edge.get_weight()).conflict_cause);
+                    auto cand_edges = graph.graph.get_edges_for_node(node_index);
+                    auto already_installed = std::any_of(cand_edges.begin(), cand_edges.end(), [](auto &edge) {
+                        if (std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight())) {
+                            auto conflict = std::get<ProblemEdge::Conflict>(edge.get_weight());
+                            return std::holds_alternative<ConflictCause::ForbidMultipleInstances>(conflict.conflict_cause);
+                        }
+                        return false;
                     });
 
-                    auto constrains_conflict = std::any_of(graph.graph.outgoing_edges(node_index).begin(), graph.graph.outgoing_edges(node_index).end(), [](auto &edge) {
-                        return std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight()) && std::holds_alternative<ConflictCause::Constrains>(std::get<ProblemEdge::Conflict>(edge.get_weight()).conflict_cause);
-                    });
+                    // todo: fix me
+//                    auto constrains_conflict = std::any_of(graph.graph.outgoing_edges(node_index).begin(), graph.graph.outgoing_edges(node_index).end(), [](auto &edge) {
+//                        return std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight()) && std::holds_alternative<ConflictCause::Constrains>(std::get<ProblemEdge::Conflict>(edge.get_weight()).conflict_cause);
+//                    });
+                    auto constrains_conflict = false;
 
-                    auto is_leaf = graph.graph.outgoing_edges(node_index).begin() == graph.graph.outgoing_edges(node_index).end();
+                    auto is_leaf = cand_edges.begin() == cand_edges.end();
 
                     if (excluded.has_value()) {
                         auto excluded_reason = excluded.value();

@@ -1351,6 +1351,9 @@ public:
 
         }
 
+//        std::cout << "unresolved_node_index: " << unresolved_node_index << std::endl;
+//        std::cout << "graph.incoming_edges(unresolved_node_index).empty(): " << graph.incoming_edges(unresolved_node_index).empty() << std::endl;
+
         std::optional<NodeIndex> final_unresolved_node;
         if (graph.incoming_edges(unresolved_node_index).empty()) {
             graph.remove_node(unresolved_node_index);

@@ -189,6 +189,16 @@ public:
         return outgoing;
     }
 
+    std::vector<Edge<P,W>> get_edges_for_node(NodeIndex nodeIndex) const {
+        std::vector<Edge<P, W>> node_edges;
+        for (auto edge: edges) {
+            if (edge.get_node_from().get_id() == nodeIndex || edge.get_node_to().get_id() == nodeIndex) {
+                node_edges.push_back(edge);
+            }
+        }
+        return node_edges;
+    }
+
     void remove_node(NodeIndex node_index) {
         nodes.erase(std::remove_if(nodes.begin(), nodes.end(), [node_index](Node<P> node) {
             return node.get_id() == node_index;
@@ -205,6 +215,15 @@ public:
             }
         }
         throw std::runtime_error("Node not found");
+    }
+
+    void print() {
+        for (auto &node: nodes) {
+            std::cout << "Node: " << node.get_id() << std::endl;
+        }
+        for (auto &edge: edges) {
+            std::cout << "Edge: " << edge.get_id() << " from: " << edge.get_node_from().get_id() << " to: " << edge.get_node_to().get_id() << std::endl;
+        }
     }
 };
 
@@ -469,6 +488,7 @@ public:
     std::unordered_set<NodeIndex> get_missing_set() {
         std::unordered_set<NodeIndex> missing;
         if (!unresolved_node.has_value()) {
+            std::cout << "Unresolved node not found" << std::endl;
             return missing;
         }
         missing.insert(unresolved_node.value());

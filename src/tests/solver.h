@@ -8,6 +8,7 @@
 #include "../Pool.h"
 #include "../DisplaySolvable.h"
 #include "../solver/Solver.h"
+#include "../DisplayUnsat.h"
 #include <cstdint>
 #include <unordered_set>
 #include <sstream>
@@ -350,20 +351,32 @@ std::string solve_unsat(BundleBoxProvider &provider, const std::vector<std::stri
     auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
     auto [steps, err] = solver.solve(requirements);
     if (err.has_value()) {
-        auto problem = err.value();
-// TODO:        auto graph = problem.graph(solver);
-        std::stringstream output;
-        output << "UNSOLVABLE:\n";
-// TODO:        graph.graphviz(output, pool, true);
-        output << "\n";
-        // TODO
-//        auto error_message = problem.display_user_friendly(solver, pool, DefaultSolvableDisplay());
-//        return error_message.to_string();
-        return "error message";
+        std::string message = std::visit([&](auto &&arg) -> std::string {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Unsolvable>) {
+                auto unsolvable = std::any_cast<UnsolvableOrCancelled::Unsolvable>(arg);
+                auto optional_problem_graph = solver.graph(unsolvable.problem);
+                std::stringstream output;
+                output << "UNSOLVABLE:\n";
+                auto graph = optional_problem_graph.value();
+                DisplayUnsat<Range<Pack>, std::string> display_unsat(pool, graph);
+                output << display_unsat.to_string() << "\n";
+
+                return output.str();
+            } else if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Cancelled>) {
+//                auto cancelled = std::any_cast<UnsolvableOrCancelled::Cancelled>(arg);
+                return "cancelled!";
+            }
+            return "unreachable!";
+        }, err.value());
+
+        std::cout << "message: " << message << std::endl;
+        return message;
     } else {
         auto reason = provider.should_cancel_with_value();
         return reason.value_or(transaction_to_string(pool, steps));
     }
+    return "";
 }
 
 // Solve the problem and returns either a solution represented as a string or an error string.

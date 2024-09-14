@@ -43,4 +43,5 @@ add_executable(test_resolvo
         src/DisplayDecisionMap.h
         src/internal/Mapping.h
         src/DisplayUnsat.h
+        src/DisplayMergedSolvable.h
 )

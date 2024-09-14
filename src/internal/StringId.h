@@ -31,6 +31,10 @@ public:
     static StringId from_usize(std::size_t x) {
         return StringId(static_cast<std::uint32_t>(x));
     }
+
+    bool operator==(const StringId& other) const {
+        return value == other.value;
+    }
 };
 
 

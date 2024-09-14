@@ -1267,68 +1267,71 @@ public:
 
     }
 
-    std::optional<ProblemGraph> graph(Problem problem) {
+    std::optional<ProblemGraph> graph(Problem& problem) {
         auto graph = DiGraph<ProblemNodeVariant, ProblemEdgeVariant>();
         std::unordered_map<SolvableId, NodeIndex> nodes;
         std::unordered_map<StringId, NodeIndex> excluded_nodes;
 
         auto root_node = problem.add_node(graph, nodes, SolvableId::root());
-        auto unresolved_node = graph.add_node(ProblemNode::UnresolvedDependency{});
+        auto unresolved_node_index = graph.add_node(ProblemNode::UnresolvedDependency{});
 
         for (const auto& clause_id: problem.clauses) {
-            auto &clause = clauses_[clause_id];
-            std::visit([this, &problem, &graph, &nodes, &excluded_nodes, &root_node, &unresolved_node](auto &&arg) {
+            auto clause = clauses_[clause_id];
+            std::visit([this, &problem, &graph, &nodes, &excluded_nodes, &root_node, &unresolved_node_index](auto &&arg) {
                 using T = std::decay_t<decltype(arg)>;
 
                 if constexpr (std::is_same_v<T, Clause::InstallRoot>) {
                     // do nothing
                 } else if constexpr (std::is_same_v<T, Clause::Excluded>) {
                     auto clause_variant = std::any_cast<Clause::Excluded>(arg);
-                    auto package_node = problem.add_node(graph, nodes, clause_variant.candidate);
-                    auto excluded_node = excluded_nodes.find(clause_variant.candidate);
+                    auto package_node_index = problem.add_node(graph, nodes, clause_variant.candidate);
+                    auto package_node = graph.get_node(package_node_index);
+                    auto excluded_node = excluded_nodes.find(clause_variant.reason);
                     if (excluded_node == excluded_nodes.end()) {
-                        excluded_nodes[clause_variant.package] = graph.add_node(ProblemNode::Excluded{clause_variant.package});
+                        excluded_nodes[clause_variant.reason] = graph.add_node(ProblemNode::Excluded{clause_variant.reason});
+                        excluded_node = excluded_nodes.find(clause_variant.reason);
                     }
-                    graph.add_edge(package_node, excluded_node, ProblemEdge::Conflict{ConflictCause::Excluded{}});
+                    graph.add_edge(package_node, graph.get_node(excluded_node->second), ProblemEdge::Conflict{ConflictCause::Excluded{}});
                 } else if constexpr (std::is_same_v<T, Clause::Learnt>) {
                     // unreachable
                 } else if constexpr (std::is_same_v<T, Clause::Requires>) {
                     auto clause_variant = std::any_cast<Clause::Requires>(arg);
-                    auto package_node = problem.add_node(graph, nodes, clause_variant.parent);
+                    auto package_node_index = problem.add_node(graph, nodes, clause_variant.parent);
+                    auto package_node = graph.get_node(package_node_index);
 
                     auto display_solvable_parent = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(clause_variant.parent));
-                    auto display_solvable_requirement = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(clause_variant.requirement));
+                    auto display_solvable_requirement = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(clause_variant.requirement));
 
-                    auto optional_sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
-                    if (optional_sorted_candidates.has_value()) {
-                        for (const SolvableId &candidate_id: optional_sorted_candidates.value()) {
-                            tracing::info("%s requires %s",
+                    auto sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
+                    if (!sorted_candidates.empty()) {
+                        for (const SolvableId &candidate_id: sorted_candidates) {
+                            tracing::info("%s requires %s\n",
                                       display_solvable_parent.to_string().c_str(),
                                       display_solvable_requirement.to_string().c_str());
 
-                            auto candidate_node = problem.add_node(graph, nodes, candidate_id);
+                            auto candidate_node_index = problem.add_node(graph, nodes, candidate_id);
                             graph.add_edge(
                                     package_node,
-                                    candidate_node,
-                                    ProblemEdge::Requires(clause_variant.requirement));
+                                    graph.get_node(candidate_node_index),
+                                    ProblemEdge::Requires{clause_variant.requirement});
                         }
                     } else {
-                        tracing::info("%s requires %s, which has no candidates",
+                        tracing::info("%s requires %s, which has no candidates\n",
                                       display_solvable_parent.to_string().c_str(),
                                       display_solvable_requirement.to_string().c_str());
 
                         graph.add_edge(
                                 package_node,
-                                unresolved_node,
-                                ProblemEdge::Requires(clause_variant.requirement));
+                                graph.get_node(unresolved_node_index),
+                                ProblemEdge::Requires{clause_variant.requirement});
                     }
                 } else if constexpr (std::is_same_v<T, Clause::Constrains>) {
                     auto clause_variant = std::any_cast<Clause::Constrains>(arg);
 
-                    auto package_node = problem.add_node(graph, nodes, clause_variant.parent);
-                    auto dep_node = problem.add_node(graph, nodes, clause_variant.forbidden_solvable);
+                    auto package_node_index = problem.add_node(graph, nodes, clause_variant.parent);
+                    auto dep_node_index = problem.add_node(graph, nodes, clause_variant.forbidden_solvable);
 
-                    graph.add_edge(package_node, dep_node, ProblemEdge::Conflict{ConflictCause::Constrains{clause_variant.via}});
+                    graph.add_edge(graph.get_node(package_node_index), graph.get_node(dep_node_index), ProblemEdge::Conflict{ConflictCause::Constrains{clause_variant.via}});
 
                 } else if constexpr (std::is_same_v<T, Clause::ForbidMultipleInstances>) {
                     auto clause_variant = std::any_cast<Clause::ForbidMultipleInstances>(arg);
@@ -1336,12 +1339,12 @@ public:
                     auto node1_id = problem.add_node(graph, nodes, clause_variant.candidate);
                     auto node2_id = problem.add_node(graph, nodes, clause_variant.constrained_candidate);
 
-                    graph.add_edge(node1_id, node2_id, ProblemEdge::Conflict{ConflictCause::ForbidMultipleInstances{}});
+                    graph.add_edge(graph.get_node(node1_id), graph.get_node(node2_id), ProblemEdge::Conflict{ConflictCause::ForbidMultipleInstances{}});
                 } else if constexpr (std::is_same_v<T, Clause::Lock>) {
                     auto clause_variant = std::any_cast<Clause::Lock>(arg);
 
                     auto node2_id = problem.add_node(graph, nodes, clause_variant.other_candidate);
-                    graph.add_edge(root_node, node2_id, ProblemEdge::Conflict{ConflictCause::Locked{clause_variant.locked_candidate}});
+                    graph.add_edge(graph.get_node(root_node), graph.get_node(node2_id), ProblemEdge::Conflict{ConflictCause::Locked{clause_variant.locked_candidate}});
                 }
 
             }, clause.kind_);
@@ -1349,11 +1352,11 @@ public:
         }
 
         std::optional<NodeIndex> final_unresolved_node;
-        if (graph.incoming_edges(unresolved_node).empty()) {
-            graph.remove_node(unresolved_node);
+        if (graph.incoming_edges(unresolved_node_index).empty()) {
+            graph.remove_node(unresolved_node_index);
             final_unresolved_node = std::nullopt;
         } else {
-            final_unresolved_node = std::optional(unresolved_node);
+            final_unresolved_node = std::optional(unresolved_node_index);
         }
 
         // Sanity check: all nodes are reachable from root

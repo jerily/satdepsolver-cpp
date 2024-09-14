@@ -50,18 +50,18 @@ public:
         auto top_level_edges = graph.graph.outgoing_edges(graph.root_node);
 
 
-        std::unordered_set<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_missing;
-        std::copy_if(top_level_edges.begin(), top_level_edges.end(), std::inserter(top_level_missing, top_level_missing.end()), [this](auto &edge) -> bool {
+        std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_missing;
+        std::copy_if(top_level_edges.begin(), top_level_edges.end(), std::back_inserter(top_level_missing), [this](auto &edge) -> bool {
             return missing_set.find(edge.get_node_to().get_id()) != missing_set.end();
         });
 
-        std::unordered_set<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_conflicts;
-//        std::copy_if(top_level_edges.begin(), top_level_edges.end(), top_level_conflicts, [this](auto &edge) -> bool {
-//            auto outgoing_edges = graph.graph.outgoing_edges(edge.get_node_to());
-//            return std::any_of(outgoing_edges.begin(), outgoing_edges.end(), [](auto &inner_edge) {
-//                return std::holds_alternative<ProblemEdge::Conflict>(inner_edge.get_weight());
-//            });
-//        });
+        std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_conflicts;
+        std::copy_if(top_level_edges.begin(), top_level_edges.end(), std::back_inserter(top_level_conflicts), [this](auto &edge) -> bool {
+            auto outgoing = graph.graph.outgoing_edges(edge.get_node_to().get_id());
+            return std::any_of(outgoing.begin(), outgoing.end(), [](auto &inner_edge) {
+                return std::holds_alternative<ProblemEdge::Conflict>(inner_edge.get_weight());
+            });
+        });
 
         if (!top_level_missing.empty()) {
             return fmt_graph(oss, top_level_missing, false);
@@ -107,7 +107,7 @@ public:
         return oss.str();
     }
 
-    std::string fmt_graph(std::ostringstream& oss, std::unordered_set<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_edges, bool top_level_indent) const {
+    std::string fmt_graph(std::ostringstream& oss, std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_edges, bool top_level_indent) const {
 
         auto reported = std::unordered_set<SolvableId>();
         // Note: we are only interested in requires edges here

@@ -217,7 +217,7 @@ public:
         throw std::runtime_error("Node not found");
     }
 
-    void print() {
+    void print() const {
         for (auto &node: nodes) {
             std::cout << "Node: " << node.get_id() << std::endl;
         }
@@ -429,12 +429,15 @@ public:
         return merged_candidates;
     }
 
-    std::unordered_set<NodeIndex> get_installable_set() {
+    std::unordered_set<NodeIndex> get_installable_set() const {
         std::unordered_set<NodeIndex> installable;
+
         DfsPostOrder<ProblemNodeVariant, ProblemEdgeVariant> dfs(graph, root_node);
+
         while (auto optional_node_index = dfs.next()) {
             if (unresolved_node == optional_node_index) {
                 // The unresolved node isn't installable
+                std::cout << "Unresolved node isn't installable" << std::endl;
                 continue;
             }
             auto node_index = optional_node_index.value();
@@ -461,6 +464,7 @@ public:
                 }
             }
             if (outgoing_conflicts) {
+                // Nodes with outgoing conflicts aren't in
                 continue;
             }
             std::unordered_map<VersionSetId, NodeIndex> dependencies;
@@ -480,8 +484,17 @@ public:
             if (!all_deps_installable) {
                 continue;
             }
+
+            // The package is installable
             installable.insert(node_index);
         }
+
+        std::cout << "Installable set: ";
+        for (auto &node_index: installable) {
+            std::cout << node_index << " ";
+        }
+        std::cout << std::endl;
+
         return installable;
     }
 

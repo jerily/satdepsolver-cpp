@@ -49,6 +49,10 @@ public:
 
         auto top_level_edges = graph.graph.outgoing_edges(graph.root_node);
 
+        // print top_level_edges
+        for (auto &edge: top_level_edges) {
+            std::cout << "edge: " << edge.get_id() << " from: " << edge.get_node_from().get_id() << " to: " << edge.get_node_to().get_id() << std::endl;
+        }
 
         std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_missing;
         std::copy_if(top_level_edges.begin(), top_level_edges.end(), std::back_inserter(top_level_missing), [this](auto &edge) -> bool {
@@ -57,10 +61,7 @@ public:
 
         std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_conflicts;
         std::copy_if(top_level_edges.begin(), top_level_edges.end(), std::back_inserter(top_level_conflicts), [this](auto &edge) -> bool {
-            auto outgoing = graph.graph.outgoing_edges(edge.get_node_to().get_id());
-            return std::any_of(outgoing.begin(), outgoing.end(), [](auto &inner_edge) {
-                return std::holds_alternative<ProblemEdge::Conflict>(inner_edge.get_weight());
-            });
+            return missing_set.find(edge.get_node_to().get_id()) == missing_set.end();
         });
 
         if (!top_level_missing.empty()) {
@@ -170,6 +171,8 @@ public:
             // pair.second is vector of edges
             return std::make_pair(DisplayOp::Requirement{pair.first, pair.second}, indenter.push_level());
         });
+
+        std::cout << "stack size: " << stack.size() << std::endl;
 
         if (!stack.empty()) {
             // Mark the first element of the stack as not having any remaining siblings

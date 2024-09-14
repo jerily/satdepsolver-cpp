@@ -258,6 +258,25 @@ public:
     }
 };
 
+using MapKeyType = std::tuple<NameId, std::vector<NodeIndex>, std::vector<NodeIndex>>;
+using MapValueType = std::vector<std::pair<NodeIndex, SolvableId>>;
+
+// add hash function for KeyType
+struct MapKeyTypeHash {
+    std::size_t operator()(const MapKeyType &key) const {
+        auto [name, predecessors, successors] = key;
+        std::size_t hash = std::hash<NameId>{}(name);
+        for (auto &predecessor: predecessors) {
+            hash ^= std::hash<NodeIndex>{}(predecessor) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        }
+        for (auto &successor: successors) {
+            hash ^= std::hash<NodeIndex>{}(successor) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        }
+        return hash;
+    }
+};
+
+
 // Graph representation of [`Problem`]
 //
 // The root of the graph is the "root solvable". Note that not all the solvable's requirements are
@@ -277,50 +296,118 @@ public:
     template<typename VS, typename N>
     std::unordered_map<SolvableId, MergedProblemNode> simplify(std::shared_ptr<Pool<VS, N>> pool) {
         std::unordered_map<SolvableId, MergedProblemNode> merged_candidates;
-        return merged_candidates;
-/*
+
         // Gather information about nodes that can be merged
-        std::unordered_map<NameId, std::pair<std::vector<NodeIndex>, std::vector<NodeIndex>>> maybe_merge;
+        std::unordered_map<MapKeyType, MapValueType, MapKeyTypeHash> maybe_merge;
+
         for (auto& node : graph.nodes) {
-            if (std::holds_alternative<ProblemNode::UnresolvedDependency>(node.get_payload()) || std::holds_alternative<ProblemNode::Excluded>(node.get_payload())) {
-                continue;
-            }
-            auto solvable_id = std::get<ProblemNode::Solvable>(node.get_payload()).solvable;
-            if (solvable_id.is_root()) {
+
+            //let candidate = match graph[node_id] {
+            //                ProblemNode::UnresolvedDependency | ProblemNode::Excluded(_) => continue,
+            //                ProblemNode::Solvable(solvable_id) => {
+            //                    if solvable_id.is_root() {
+            //                        continue;
+            //                    } else {
+            //                        solvable_id
+            //                    }
+            //                }
+            //            };
+
+            auto optional_candidate = std::visit([](auto &&arg) -> std::optional<SolvableId> {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, ProblemNode::UnresolvedDependency> || std::is_same_v<T, ProblemNode::Excluded>) {
+                    return std::nullopt;
+                } else if constexpr (std::is_same_v<T, ProblemNode::Solvable>) {
+                    auto solvable_arg = std::any_cast<ProblemNode::Solvable>(arg);
+                    if (solvable_arg.solvable.is_root()) {
+                        return std::nullopt;
+                    } else {
+                        return std::make_optional(solvable_arg.solvable);
+                    }
+                }
+            }, node.get_payload());
+
+            if (!optional_candidate.has_value()) {
                 continue;
             }
 
-            auto candidate = solvable_id;
+            auto candidate = optional_candidate.value();
 
-            auto predecessors = graph.incoming_edges(node.get_id());
-            auto successors = graph.outgoing_edges(node.get_id());
-            auto name = pool->resolve_solvable(solvable_id).get_name_id();
+            //let predecessors: Vec<_> = graph
+            //                .edges_directed(node_id, Direction::Incoming)
+            //                .map(|e| e.source())
+            //                .sorted_unstable()
+            //                .collect();
+
+            auto predecessors_edges = graph.incoming_edges(node.get_id());
+            auto predecessors = std::vector<NodeIndex>();
+            for (auto& edge: predecessors_edges) {
+                predecessors.push_back(edge.get_node_from().get_id());
+            }
+            std::sort(predecessors.begin(), predecessors.end());
+
+            //            let successors: Vec<_> = graph
+            //                .edges(node_id)
+            //                .map(|e| e.target())
+            //                .sorted_unstable()
+            //                .collect();
+
+            auto successors_edges = graph.outgoing_edges(node.get_id());
+            auto successors = std::vector<NodeIndex>();
+            for (auto& edge: successors_edges) {
+                successors.push_back(edge.get_node_to().get_id());
+            }
+            std::sort(successors.begin(), successors.end());
+
+            //            let name = pool.resolve_solvable(candidate).name;
+
+            auto name = pool->resolve_solvable(candidate).get_name_id();
+
+            //            let entry = maybe_merge
+            //                .entry((name, predecessors, successors))
+            //                .or_insert(Vec::new());
+            //
+            //            entry.push((node_id, candidate));
+
             auto key = std::make_tuple(name, predecessors, successors);
             auto entry = maybe_merge.find(key);
             if (entry == maybe_merge.end()) {
-                maybe_merge.insert(std::pair(key, std::vector<NodeIndex>()));
+                maybe_merge.insert(std::pair(key, std::vector<std::pair<NodeIndex, SolvableId>>()));
                 entry = maybe_merge.find(key);
             }
             entry->second.push_back(std::make_pair(node.get_id(), candidate));
         }
+
+        //let mut merged_candidates = HashMap::default();
+        //        for m in maybe_merge.into_values() {
+        //            if m.len() > 1 {
+        //                let m = Rc::new(MergedProblemNode {
+        //                    ids: m.into_iter().map(|(_, snd)| snd).collect(),
+        //                });
+        //                for &id in &m.ids {
+        //                    merged_candidates.insert(id, m.clone());
+        //                }
+        //            }
+        //        }
+
+
+
         for (const auto& [key, value] : maybe_merge) {
-            auto [predecessors, successors] = value;
             auto m = MergedProblemNode();
             m.ids = std::vector<SolvableId>();
-            for (auto& node_index : predecessors) {
-                auto solvable_id = std::get<ProblemNode::Solvable>(graph.nodes[node_index].get_payload()).solvable;
-                m.ids.push_back(solvable_id);
+
+            if (value.size() > 1) {
+                for (const auto& [_, snd] : value) {
+                    m.ids.push_back(snd);
+                }
             }
-            for (auto& node_index : successors) {
-                auto solvable_id = std::get<ProblemNode::Solvable>(graph.nodes[node_index].get_payload()).solvable;
-                m.ids.push_back(solvable_id);
-            }
+
             for (const auto& id: m.ids) {
                 merged_candidates.insert(std::pair(id, m));
             }
         }
+
         return merged_candidates;
-        */
     }
 
     std::unordered_set<NodeIndex> get_installable_set() {

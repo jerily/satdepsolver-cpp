@@ -767,7 +767,7 @@ int main(int argc, char *argv[]) {
 //    test_resolve_favor_with_conflict();
 //    test_resolve_cyclic();
 //    test_unsat_locked_and_excluded();
-    test_unsat_no_candidates_for_child_1();
+//    test_unsat_no_candidates_for_child_1();
 //    test_unsat_no_candidates_for_child_2();
 //    test_unsat_missing_top_level_dep_1();
 //    test_unsat_missing_top_level_dep_2();
@@ -775,7 +775,7 @@ int main(int argc, char *argv[]) {
 //    test_unsat_after_backtracking();
 //    test_unsat_incompatible_root_requirements();
 //    test_unsat_bluesky_conflict();
-//    test_unsat_pubgrub_article();
+    test_unsat_pubgrub_article();
 //
 //    test_unsat_applies_graph_compression();
 //    test_unsat_constrains();

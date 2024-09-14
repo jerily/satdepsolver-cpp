@@ -358,7 +358,7 @@ std::string solve_unsat(BundleBoxProvider &provider, const std::vector<std::stri
                 auto optional_problem_graph = solver.graph(unsolvable.problem);
                 std::stringstream output;
                 output << "UNSOLVABLE:\n";
-                auto graph = optional_problem_graph.value();
+                const auto& graph = optional_problem_graph.value();
                 DisplayUnsat<Range<Pack>, std::string> display_unsat(pool, graph);
                 output << display_unsat.to_string() << "\n";
 

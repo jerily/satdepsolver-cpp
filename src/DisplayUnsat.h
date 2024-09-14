@@ -96,8 +96,8 @@ public:
                     auto locked_solvable = std::get<ConflictCause::Locked>(conflict).solvable;
                     auto locked = pool->resolve_internal_solvable(locked_solvable);
                     auto display_locked_solvable = DisplaySolvable<VS, N>(pool, locked);
-                    auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, locked);
-                    oss << indent << display_locked_solvable.to_string() << " " << display_merged_solvable.to_string() << " is locked, but another version is required as reported above" << std::endl;
+//                    auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, locked);
+                    oss << indent << display_locked_solvable.to_string() << " " << " is locked, but another version is required as reported above" << std::endl;
                 } else if (std::holds_alternative<ConflictCause::Excluded>(conflict)) {
                     continue;
                 }
@@ -337,15 +337,11 @@ public:
                         for (auto &id : merged->second.ids) {
                             reported.insert(id);
                         }
-                        // todo
-//                        auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, merged->second.ids);
-//                        version = display_merged_solvable.to_string();
-                        version = "X";
+                        auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, merged->second.ids);
+                        version = display_merged_solvable.to_string();
                     } else {
-                        // todo
-//                        auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, merged->second.ids);
-//                        version = display_merged_solvable.to_string();
-                        version = "Y";
+                        auto display_candidates = DisplayMergedSolvable<VS, N>(pool, {solvable_id});
+                        version = display_candidates.to_string();
                     }
 
                     std::optional<StringId> excluded;

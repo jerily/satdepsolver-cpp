@@ -23,6 +23,7 @@
 //
 // Ranges can be created from any type that implements [`Ord`] + [`Clone`].
 
+#include <any>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -61,6 +62,7 @@ struct Unbounded {
     }
 
     bool operator==(const Unbounded &other) const {
+        (void)other;
         return true;
     }
 };
@@ -110,6 +112,12 @@ public:
         return Range({{Included<V>{v}, Unbounded()}});
     }
 
+    // Set of all versions higher or equal to some version
+    static Range compatible_with(const V &v) {
+        V next_v = v.next_major_version();
+        return Range({{Included<V>{v}, Excluded<V>{next_v}}});
+    }
+
     // Set of all versions higher to some version
     static Range strictly_higher_than(const V &v) {
         return Range({{Excluded<V>{v}, Unbounded()}});
@@ -142,50 +150,62 @@ public:
             return full();
         }
 
-        return std::visit([this](const auto &segment) {
-            auto [low, high] = segment;
-            using T_LOW = std::decay_t<decltype(low)>;
-            using T_HIGH = std::decay_t<decltype(high)>;
+        auto [segment_low, segment_high] = segments[0];
+
+        return std::visit([this](auto &&arg_low, auto &&arg_high) {
+            using T_LOW = std::decay_t<decltype(arg_low)>;
+            using T_HIGH = std::decay_t<decltype(arg_high)>;
 
             if constexpr (std::is_same_v<T_LOW, Unbounded> && std::is_same_v<T_HIGH, Unbounded>) {
                 return empty();
             } else if constexpr (std::is_same_v<T_LOW, Included<V>> && std::is_same_v<T_HIGH, Unbounded>) {
+                auto low = std::any_cast<Included<V>>(arg_low);
                 return strictly_lower_than(low.value);
             } else if constexpr (std::is_same_v<T_LOW, Excluded<V>> && std::is_same_v<T_HIGH, Unbounded>) {
+                auto low = std::any_cast<Included<V>>(arg_low);
                 return lower_than(low.value);
             } else if constexpr (std::is_same_v<T_LOW, Unbounded> && std::is_same_v<T_HIGH, Included<V>>) {
-                return negate_segments(Excluded<V>(high.value),
+                auto high = std::any_cast<Included<V>>(arg_high);
+                return negate_segments(Excluded<V>{high.value},
                                        std::vector<Interval<V>>(segments.begin() + 1, segments.end()));
             } else if constexpr (std::is_same_v<T_LOW, Unbounded> && std::is_same_v<T_HIGH, Excluded<V>>) {
-                return negate_segments(Included<V>(high.value),
+                auto high = std::any_cast<Included<V>>(arg_high);
+                return negate_segments(Included<V>{high.value},
                                        std::vector<Interval<V>>(segments.begin() + 1, segments.end()));
             } else {
                 return negate_segments(Unbounded(), segments);
             }
-        }, segments[0]);
+        }, segment_low, segment_high);
     }
 
     // Helper function performing the negation of intervals in segments.
-    Range negate_segments(BoundVariant<V> start, std::vector<Interval<V>> segments_to_negate) {
+    Range negate_segments(BoundVariant<V> start, std::vector<Interval<V>> segments_to_negate) const {
         std::vector<Interval<V>> complement_segments;
         for (auto [v1, v2] : segments_to_negate) {
-            auto bound = std::visit([](const auto &v) {
-                if constexpr (std::is_same_v<decltype(v), Included<V>>) {
-                    return Excluded<V>(v.value);
-                } else if constexpr (std::is_same_v<decltype(v), Excluded<V>>) {
-                    return Included<V>(v.value);
+            auto bound = std::visit([](auto &&arg_v) -> BoundVariant<V> {
+                using T = std::decay_t<decltype(arg_v)>;
+                if constexpr (std::is_same_v<T, Included<V>>) {
+                    auto v = std::any_cast<Included<V>>(arg_v);
+                    return Excluded<V>{v.value};
+                } else if constexpr (std::is_same_v<T, Excluded<V>>) {
+                    auto v = std::any_cast<Excluded<V>>(arg_v);
+                    return Included<V>{v.value};
                 } else {
-                    throw std::runtime_error("Unreachable");
+//                    throw std::runtime_error("Unreachable");
+                    return Unbounded{};
                 }
             }, v1);
             complement_segments.push_back({start, bound});
-            start = std::visit([](const auto &v) {
-                if constexpr (std::is_same_v<decltype(v), Included<V>>) {
-                    return Excluded<V>(v.value);
-                } else if constexpr (std::is_same_v<decltype(v), Excluded<V>>) {
-                    return Included<V>(v.value);
+            start = std::visit([](auto &&arg_v) -> BoundVariant<V> {
+                using T = std::decay_t<decltype(arg_v)>;
+                if constexpr (std::is_same_v<T, Included<V>>) {
+                    auto v = std::any_cast<Included<V>>(arg_v);
+                    return Excluded<V>{v.value};
+                } else if constexpr (std::is_same_v<T, Excluded<V>>) {
+                    auto v = std::any_cast<Excluded<V>>(arg_v);
+                    return Included<V>{v.value};
                 } else {
-                    return Unbounded();
+                    return Unbounded{};
                 }
             }, v2);
         }
@@ -214,7 +234,7 @@ public:
     // Returns true if the this Range contains the specified value.
     bool contains(const V &v) const {
         for (auto [start, end]: segments) {
-            auto result = std::visit([&v](const auto &start_arg, const auto &end_arg) {
+            auto result = std::visit([&v](auto &&start_arg, auto &&end_arg) {
                 using T_start = std::decay_t<decltype(start_arg)>;
                 using T_end = std::decay_t<decltype(end_arg)>;
 
@@ -252,16 +272,16 @@ public:
                 return false;
             }, start, end);
 
-            if (result) {
-                return true;
+            if (!result) {
+                return false;
             }
         }
-        return false;
+        return true;
     }
 
     // Computes the union of this `Range` and another.
     Range union_with(const Range &other) const {
-        return complement().intersection(other.complement()).complement();
+        return complement().intersection_with(other.complement()).complement();
     }
 
     // Computes the intersection of two sets of versions.
@@ -270,56 +290,98 @@ public:
         auto left_iter = segments.cbegin();
         auto right_iter = other.segments.cbegin();
         while (left_iter != segments.cend() && right_iter != other.segments.cend()) {
-            auto [left_start, left_end] = *left_iter;
-            auto [right_start, right_end] = *right_iter;
+            auto &[left_start, left_end] = *left_iter;
+            auto &[right_start, right_end] = *right_iter;
 
-            auto start = std::visit([&left_start, &right_start](const auto &l, const auto &r) {
-                if constexpr (std::is_same_v<decltype(l), Included<V>> && std::is_same_v<decltype(r), Included<V>>) {
-                    return Included<V>(std::max(l.value, r.value));
-                } else if constexpr (std::is_same_v<decltype(l), Excluded<V>> && std::is_same_v<decltype(r), Excluded<V>>) {
-                    return Excluded<V>(std::max(l.value, r.value));
-                } else if constexpr (std::is_same_v<decltype(l), Included<V>> && std::is_same_v<decltype(r), Excluded<V>>) {
+            auto start = std::visit([](auto &&arg_l, auto &&arg_r) -> BoundVariant<V> {
+                using T_l = std::decay_t<decltype(arg_l)>;
+                using T_r = std::decay_t<decltype(arg_r)>;
+
+                if constexpr (std::is_same_v<T_l, Included<V>> && std::is_same_v<T_r, Included<V>>) {
+                    auto l = std::any_cast<Included<V>>(arg_l);
+                    auto r = std::any_cast<Included<V>>(arg_r);
+                    return Included<V>{std::max(l.value, r.value)};
+                } else if constexpr (std::is_same_v<T_l, Excluded<V>> && std::is_same_v<T_r, Excluded<V>>) {
+                    auto l = std::any_cast<Excluded<V>>(arg_l);
+                    auto r = std::any_cast<Excluded<V>>(arg_r);
+                    return Excluded<V>{std::max(l.value, r.value)};
+                } else if constexpr (std::is_same_v<T_l, Included<V>> && std::is_same_v<T_r, Excluded<V>>) {
+                    auto l = std::any_cast<Included<V>>(arg_l);
+                    auto r = std::any_cast<Excluded<V>>(arg_r);
                     if (l.value <= r.value) {
-                        return Excluded<V>(r.value);
+                        return Excluded<V>{r.value};
                     } else {
                         return l;
                     }
-                } else if constexpr (std::is_same_v<decltype(l), Excluded<V>> && std::is_same_v<decltype(r), Included<V>>) {
+                } else if constexpr (std::is_same_v<T_l, Excluded<V>> && std::is_same_v<T_r, Included<V>>) {
+                    auto l = std::any_cast<Excluded<V>>(arg_l);
+                    auto r = std::any_cast<Included<V>>(arg_r);
                     if (r.value < l.value) {
-                        return Included<V>(r.value);
+                        return Included<V>{r.value};
                     } else {
                         return l;
                     }
-                } else if constexpr (std::is_same_v<decltype(l), Unbounded> && std::is_same_v<decltype(r), Included<V>>) {
+                } else if constexpr (std::is_same_v<T_l, Unbounded> && std::is_same_v<T_r, Included<V>>) {
+                    auto r = std::any_cast<Included<V>>(arg_r);
                     return r;
-                } else if constexpr (std::is_same_v<decltype(l), Included<V>> && std::is_same_v<decltype(r), Unbounded>) {
+                } else if constexpr (std::is_same_v<T_l, Included<V>> && std::is_same_v<T_r, Unbounded>) {
+                    auto l = std::any_cast<Included<V>>(arg_l);
                     return l;
+                } else if constexpr (std::is_same_v<T_l, Unbounded> && std::is_same_v<T_r, Excluded<V>>) {
+                    auto r = std::any_cast<Excluded<V>>(arg_r);
+                    return r;
+                } else if constexpr (std::is_same_v<T_l, Excluded<V>> && std::is_same_v<T_r, Unbounded>) {
+                    auto l = std::any_cast<Excluded<V>>(arg_l);
+                    return l;
+                } else if constexpr (std::is_same_v<T_l, Unbounded> && std::is_same_v<T_r, Unbounded>) {
+                    return Unbounded{};
                 } else {
                     throw std::runtime_error("Unreachable");
                 }
             }, left_start, right_start);
 
-            auto end = std::visit([&left_end, &right_end](const auto &l, const auto &r) {
-                if constexpr (std::is_same_v<decltype(l), Included<V>> && std::is_same_v<decltype(r), Included<V>>) {
-                    return Included<V>(std::min(l.value, r.value));
-                } else if constexpr (std::is_same_v<decltype(l), Excluded<V>> && std::is_same_v<decltype(r), Excluded<V>>) {
-                    return Excluded<V>(std::min(l.value, r.value));
-                } else if constexpr (std::is_same_v<decltype(l), Included<V>> && std::is_same_v<decltype(r), Excluded<V>>) {
+            auto end = std::visit([](auto &arg_l, auto &arg_r) -> BoundVariant<V> {
+                using T_l = std::decay_t<decltype(arg_l)>;
+                using T_r = std::decay_t<decltype(arg_r)>;
+
+                if constexpr (std::is_same_v<T_l, Included<V>> && std::is_same_v<T_r, Included<V>>) {
+                    auto l = std::any_cast<Included<V>>(arg_l);
+                    auto r = std::any_cast<Included<V>>(arg_r);
+                    return Included<V>{std::min(l.value, r.value)};
+                } else if constexpr (std::is_same_v<T_l, Excluded<V>> && std::is_same_v<T_r, Excluded<V>>) {
+                    auto l = std::any_cast<Excluded<V>>(arg_l);
+                    auto r = std::any_cast<Excluded<V>>(arg_r);
+                    return Excluded<V>{std::min(l.value, r.value)};
+                } else if constexpr (std::is_same_v<T_l, Included<V>> && std::is_same_v<T_r, Excluded<V>>) {
+                    auto l = std::any_cast<Included<V>>(arg_l);
+                    auto r = std::any_cast<Excluded<V>>(arg_r);
                     if (l.value >= r.value) {
-                        return Excluded<V>(r.value);
+                        return Excluded<V>{r.value};
                     } else {
                         return l;
                     }
-                } else if constexpr (std::is_same_v<decltype(l), Excluded<V>> && std::is_same_v<decltype(r), Included<V>>) {
+                } else if constexpr (std::is_same_v<T_l, Excluded<V>> && std::is_same_v<T_r, Included<V>>) {
+                    auto l = std::any_cast<Excluded<V>>(arg_l);
+                    auto r = std::any_cast<Included<V>>(arg_r);
                     if (r.value > l.value) {
-                        return Included<V>(r.value);
+                        return Included<V>{r.value};
                     } else {
                         return l;
                     }
-                } else if constexpr (std::is_same_v<decltype(l), Unbounded> && std::is_same_v<decltype(r), Included<V>>) {
+                } else if constexpr (std::is_same_v<T_l, Unbounded> && std::is_same_v<T_r, Included<V>>) {
+                    auto r = std::any_cast<Included<V>>(arg_r);
                     return r;
-                } else if constexpr (std::is_same_v<decltype(l), Included<V>> && std::is_same_v<decltype(r), Unbounded>) {
+                } else if constexpr (std::is_same_v<T_l, Included<V>> && std::is_same_v<T_r, Unbounded>) {
+                    auto l = std::any_cast<Included<V>>(arg_l);
                     return l;
+                } else if constexpr (std::is_same_v<T_l, Unbounded> && std::is_same_v<T_r, Excluded<V>>) {
+                    auto r = std::any_cast<Excluded<V>>(arg_r);
+                    return r;
+                } else if constexpr (std::is_same_v<T_l, Excluded<V>> && std::is_same_v<T_r, Unbounded>) {
+                    auto l = std::any_cast<Excluded<V>>(arg_l);
+                    return l;
+                } else if constexpr (std::is_same_v<T_l, Unbounded> && std::is_same_v<T_r, Unbounded>) {
+                    return Unbounded{};
                 } else {
                     throw std::runtime_error("Unreachable");
                 }
@@ -395,7 +457,6 @@ public:
                         auto e = std::any_cast<Excluded<V>>(end_arg);
                         return ">" + s.value + ", <" + e.value;
                     }
-                    return "";
                 }, start, end);
             }
         }
@@ -433,8 +494,8 @@ private:
         }
     }
 
-    bool valid_segment(const BoundVariant<V> &start, const BoundVariant<V> &end) {
-        return std::visit([](const auto &start_arg, const auto &end_arg) {
+    bool valid_segment(const BoundVariant<V> &start, const BoundVariant<V> &end) const {
+        return std::visit([](auto &&start_arg, auto &&end_arg) {
             using T_start = std::decay_t<decltype(start_arg)>;
             using T_end = std::decay_t<decltype(end_arg)>;
 

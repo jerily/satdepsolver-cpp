@@ -6,34 +6,44 @@
 #include "Pool.h"
 #include "solver/Clause.h"
 
-// The DisplaySolvable class template is used to visualize a solvable
 template<typename VS, typename N>
 class DisplayMergedSolvable {
 private:
     std::shared_ptr<Pool<VS, N>> pool;
-    InternalSolvable<typename VS::ValueType> solvable;
+    std::vector<SolvableId> ids;
 
 public:
 // Constructor
-    explicit DisplayMergedSolvable(std::shared_ptr<Pool<VS, N>> poolRef, const InternalSolvable<typename VS::ValueType> &solvableRef)
-            : pool(poolRef), solvable(solvableRef) {}
+    explicit DisplayMergedSolvable(std::shared_ptr<Pool<VS, N>> poolRef, const std::vector<SolvableId> &idsRef)
+            : pool(poolRef) {
 
-    friend std::ostream &operator<<(std::ostream &os, const DisplayMergedSolvable &display_solvable) {
-        os << display_solvable.to_string();
+        // copy idsRef to ids
+        std::copy(idsRef.begin(), idsRef.end(), std::back_inserter(ids));
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const DisplayMergedSolvable &display_merged_solvable) {
+        os << display_merged_solvable.to_string();
         return os;
     }
 
     std::string to_string() const {
         std::ostringstream oss;
-        std::visit([this, &oss](auto &&arg) {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, SolvableInner::Root>) {
-                oss << "<root>";
-            } else if constexpr (std::is_same_v<T, SolvableInner::Package<typename VS::ValueType>>) {
-                auto package = std::any_cast<SolvableInner::Package<typename VS::ValueType>>(arg);
-                oss << pool->resolve_package_name(package.solvable.get_name_id()) << "=" << package.solvable.get_inner();
+        std::vector<typename VS::ValueType> version_records;
+        std::transform(ids.begin(), ids.end(), std::back_inserter(version_records),
+                                [this](const SolvableId &id) { return pool->resolve_solvable(id).get_inner(); });
+
+        std::sort(version_records.begin(), version_records.end());
+
+        // join the version sets with "|"
+        bool first = true;
+        for (const auto &vs : version_records) {
+            if (!first) {
+                oss << " | ";
+            } else {
+                first = false;
             }
-        }, solvable.inner);
+            oss << vs;
+        }
         return oss.str();
     }
 

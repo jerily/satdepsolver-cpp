@@ -171,8 +171,6 @@ public:
             stack[0].second.set_last();
         }
 
-        std::cout << "stack size: " << stack.size() << std::endl;
-
         while (!stack.empty()) {
             auto node_indenter_pair = stack.back();
             stack.pop_back();
@@ -328,7 +326,6 @@ public:
                     //                        self.merged_solvable_display
                     //                            .display_candidates(&self.pool, &[solvable_id])
                     //                    };
-                    // in c++ it should be:
 
                     auto merged = merged_candidates.find(solvable_id);
 
@@ -381,8 +378,8 @@ public:
                         std::vector<VersionSetId> version_sets;
                         std::transform(candidate_edges.begin(), candidate_edges.end(), std::back_inserter(version_sets), [](auto &edge) {
                             return std::visit([](auto &&arg) -> VersionSetId {
-                                using T = std::decay_t<decltype(arg)>;
-                                if constexpr (std::is_same_v<T, ProblemEdge::Conflict>) {
+                                using T_arg = std::decay_t<decltype(arg)>;
+                                if constexpr (std::is_same_v<T_arg, ProblemEdge::Conflict>) {
                                     auto conflict_arg = std::any_cast<ProblemEdge::Conflict>(arg);
                                     return std::get<ConflictCause::Constrains>(conflict_arg.conflict_cause).version;
                                 } else {
@@ -412,35 +409,36 @@ public:
                         oss << indent << name << " " << version << " would require" << std::endl;
 
                         std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> chunked_edges;
-//                        auto node_outgoing_edges = graph.graph.outgoing_edges(node_index);
-//                        std::copy_if(node_outgoing_edges.begin(), node_outgoing_edges.end(), chunked_edges, [](auto &edge) {
-//                            return std::holds_alternative<ProblemEdge::Requires>(edge.get_weight());
-//                        });
+                        auto node_outgoing_edges = graph.graph.outgoing_edges(node_index);
+                        std::copy_if(node_outgoing_edges.begin(), node_outgoing_edges.end(), std::back_inserter(chunked_edges), [](auto &edge) {
+                            return std::holds_alternative<ProblemEdge::Requires>(edge.get_weight());
+                        });
 
-                        std::unordered_map<VersionSetId, std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>>> chunked;
+                        std::unordered_map<VersionSetId, std::vector<EdgeIndex>> chunked;
                         for (auto &edge : chunked_edges) {
                             auto requires = std::get<ProblemEdge::Requires>(edge.get_weight());
-                            chunked[requires.version_set_id].push_back(edge);
+                            chunked[requires.version_set_id].push_back(edge.get_id());
                         }
 
-//                        std::sort(chunked.begin(), chunked.end(), [this](auto &a, auto &b) {
-//                            auto a_edges = a.second;
-//                            auto b_edges = b.second;
-//                            auto a_installable = std::any_of(a_edges.begin(), a_edges.end(), [this](auto &edge) {
-//                                return installable_set.find(edge.get_node_to().get_id()) != installable_set.end();
-//                            });
-//                            auto b_installable = std::any_of(b_edges.begin(), b_edges.end(), [this](auto &edge) {
-//                                return installable_set.find(edge.get_node_to().get_id()) != installable_set.end();
-//                            });
-//                            return a_installable > b_installable;
-//                        });
+                        std::vector<std::pair<VersionSetId, std::vector<EdgeIndex>>> chunked_vector(chunked.begin(), chunked.end());
+                        std::sort(chunked_vector.begin(), chunked_vector.end(), [this](auto &a, auto &b) {
+                            auto a_edges = a.second;
+                            auto b_edges = b.second;
+                            auto a_installable = std::any_of(a_edges.begin(), a_edges.end(), [this](auto &edge) {
+                                return installable_set.find(graph.graph.edges.at(edge).get_node_to().get_id()) != installable_set.end();
+                            });
+                            auto b_installable = std::any_of(b_edges.begin(), b_edges.end(), [this](auto &edge) {
+                                return installable_set.find(graph.graph.edges.at(edge).get_node_to().get_id()) != installable_set.end();
+                            });
+                            return a_installable > b_installable;
+                        });
 
                         std::vector<std::pair<DisplayOpVariant, Indenter>> requirements;
-//                        std::vector<std::pair<DisplayOpVariant, Indenter>> requirements = std::map(chunked.begin(), chunked.end(), [&node_indenter_pair](auto &pair) {
+                        std::transform(chunked_vector.begin(), chunked_vector.end(), std::back_inserter(requirements), [&node_indenter_pair](auto &pair) {
 //                             pair.first is version_set_id
 //                             pair.second is vector of edges
-//                            return std::make_pair(DisplayOp::Requirement{pair.first, pair.second}, node_indenter_pair.second.push_level());
-//                        });
+                            return std::make_pair(DisplayOp::Requirement{pair.first, pair.second}, node_indenter_pair.second.push_level());
+                        });
 
                         if (!requirements.empty()) {
                             requirements[0].second.set_last();

@@ -272,15 +272,16 @@ public:
         stack.push_back(root_node);
     }
 
-    // implemenet dfs post order using two stacks
+    // implement dfs post order using two stacks and make sure that the root node is the last one
     std::optional<NodeIndex> next() {
         while (!stack.empty()) {
             auto node_index = stack.back();
             if (visited.find(node_index) == visited.end()) {
                 visited.insert(node_index);
                 for (auto &edge: graph.outgoing_edges(node_index)) {
-                    if (visited.find(edge.get_node_to().get_id()) == visited.end()) {
-                        stack.push_back(edge.get_node_to().get_id());
+                    auto target_node_index = edge.get_node_to().get_id();
+                    if (visited.find(target_node_index) == visited.end()) {
+                        stack.push_back(target_node_index);
                     }
                 }
             } else {

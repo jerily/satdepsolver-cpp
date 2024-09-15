@@ -47,20 +47,21 @@ public:
     std::string to_string() {
         std::ostringstream oss;
 
-        auto top_level_edges = graph.graph.outgoing_edges(graph.root_node);
+        //let (top_level_missing, top_level_conflicts): (Vec<_>, _) = self
+        //            .graph
+        //            .graph
+        //            .edges(self.graph.root_node)
+        //            .partition(|e| self.missing_set.contains(&e.target()));
 
-        // print top_level_edges
-        for (auto &edge: top_level_edges) {
-            std::cout << "edge: " << edge.get_id() << " from: " << edge.get_node_from().get_id() << " to: " << edge.get_node_to().get_id() << std::endl;
-        }
+        auto root_edges = graph.graph.get_edges_for_node(graph.root_node);
 
         std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_missing;
-        std::copy_if(top_level_edges.begin(), top_level_edges.end(), std::back_inserter(top_level_missing), [this](auto &edge) -> bool {
+        std::copy_if(root_edges.begin(), root_edges.end(), std::back_inserter(top_level_missing), [this](auto &edge) -> bool {
             return missing_set.find(edge.get_node_to().get_id()) != missing_set.end();
         });
 
         std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> top_level_conflicts;
-        std::copy_if(top_level_edges.begin(), top_level_edges.end(), std::back_inserter(top_level_conflicts), [this](auto &edge) -> bool {
+        std::copy_if(root_edges.begin(), root_edges.end(), std::back_inserter(top_level_conflicts), [this](auto &edge) -> bool {
             return missing_set.find(edge.get_node_to().get_id()) == missing_set.end();
         });
 
@@ -193,17 +194,23 @@ public:
                     auto edges = requirement.edges;
                     assert(!edges.empty());
 
+                    //let installable = edges.iter().any(|&e| {
+                    //                        let (_, target) = graph.edge_endpoints(e).unwrap();
+                    //                        installable_nodes.contains(&target)
+                    //                    });
+
                     auto installable = std::any_of(edges.begin(), edges.end(), [this](auto &edge) {
                         auto edge_object = graph.graph.edges.at(edge);
-                        return installable_set.find(edge_object.get_node_to().get_id()) != installable_set.end();
+                        auto target = edge_object.get_node_to();
+                        return installable_set.find(target.get_id()) != installable_set.end();
                     });
 
                     auto req = pool->resolve_version_set(version_set_id);
                     auto name_id = pool->resolve_version_set_package_name(version_set_id);
                     auto name = pool->resolve_package_name(name_id);
 
-                    auto target_nx = graph.graph.edges.at(edges[0]).get_node_to();
-                    auto missing = edges.size() == 1 && std::holds_alternative<ProblemNode::UnresolvedDependency>(target_nx.get_payload());
+                    auto target = graph.graph.edges.at(edges[0]).get_node_to();
+                    auto missing = edges.size() == 1 && std::holds_alternative<ProblemNode::UnresolvedDependency>(target.get_payload());
 
                     if (missing) {
                         // No candidates for requirement
@@ -374,22 +381,42 @@ public:
                         }
                     }
 
+                    //let already_installed = graph.edges(candidate).any(|e| {
+                    //                        e.weight() == &ProblemEdge::Conflict(ConflictCause::ForbidMultipleInstances)
+                    //                    });
+
                     auto cand_edges = graph.graph.get_edges_for_node(node_index);
-                    auto already_installed = std::any_of(cand_edges.begin(), cand_edges.end(), [](auto &edge) {
+                    auto already_installed = std::any_of(cand_edges.begin(), cand_edges.end(), [](auto &&edge) {
+                        return std::visit([](auto &&arg) -> bool {
+                            using T_arg = std::decay_t<decltype(arg)>;
+                            if constexpr (std::is_same_v<T_arg, ProblemEdge::Conflict>) {
+                                auto conflict_arg = std::any_cast<ProblemEdge::Conflict>(arg);
+                                return std::holds_alternative<ConflictCause::ForbidMultipleInstances>(conflict_arg.conflict_cause);
+                            } else {
+                                return false;
+                            }
+                        }, edge.get_weight());
+                    });
+
+
+                    //let constrains_conflict = graph.edges(candidate).any(|e| {
+                    //                        matches!(
+                    //                            e.weight(),
+                    //                            ProblemEdge::Conflict(ConflictCause::Constrains(_))
+                    //                        )
+                    //                    });
+
+                    auto constrains_conflict = std::any_of(cand_edges.begin(), cand_edges.end(), [](auto &edge) {
                         if (std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight())) {
                             auto conflict = std::get<ProblemEdge::Conflict>(edge.get_weight());
-                            return std::holds_alternative<ConflictCause::ForbidMultipleInstances>(conflict.conflict_cause);
+                            return std::holds_alternative<ConflictCause::Constrains>(conflict.conflict_cause);
                         }
                         return false;
                     });
 
-                    // todo: fix me
-//                    auto constrains_conflict = std::any_of(graph.graph.outgoing_edges(node_index).begin(), graph.graph.outgoing_edges(node_index).end(), [](auto &edge) {
-//                        return std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight()) && std::holds_alternative<ConflictCause::Constrains>(std::get<ProblemEdge::Conflict>(edge.get_weight()).conflict_cause);
-//                    });
-                    auto constrains_conflict = false;
+                    // let is_leaf = graph.edges(candidate).next().is_none();
 
-                    auto is_leaf = cand_edges.begin() == cand_edges.end();
+                    auto is_leaf = cand_edges.size() == 1;
 
                     if (excluded.has_value()) {
                         auto excluded_reason = excluded.value();
@@ -442,7 +469,10 @@ public:
                         std::unordered_map<VersionSetId, std::vector<EdgeIndex>> chunked;
                         for (auto &edge : chunked_edges) {
                             auto requires = std::get<ProblemEdge::Requires>(edge.get_weight());
-                            chunked[requires.version_set_id].push_back(edge.get_id());
+                            if (chunked.find(requires.version_set_id) == chunked.end()) {
+                                chunked[requires.version_set_id] = std::vector<EdgeIndex>();
+                            }
+                            chunked.at(requires.version_set_id).push_back(edge.get_id());
                         }
 
                         std::vector<std::pair<VersionSetId, std::vector<EdgeIndex>>> chunked_vector(chunked.begin(), chunked.end());

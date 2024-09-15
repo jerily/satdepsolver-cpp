@@ -272,30 +272,25 @@ public:
         stack.push_back(root_node);
     }
 
+    // implemenet dfs post order using two stacks
     std::optional<NodeIndex> next() {
         while (!stack.empty()) {
             auto node_index = stack.back();
-
-            if (processed.find(node_index) != processed.end()) {
-                stack.pop_back();
-                continue;
-            }
-
             if (visited.find(node_index) == visited.end()) {
                 visited.insert(node_index);
-                auto outgoing_edges = graph.outgoing_edges(node_index);
-                for (auto &edge : outgoing_edges) {
+                for (auto &edge: graph.outgoing_edges(node_index)) {
                     if (visited.find(edge.get_node_to().get_id()) == visited.end()) {
                         stack.push_back(edge.get_node_to().get_id());
                     }
                 }
             } else {
-                processed.insert(node_index);
                 stack.pop_back();
-                return node_index;
+                if (processed.find(node_index) == processed.end()) {
+                    processed.insert(node_index);
+                    return node_index;
+                }
             }
         }
-
         return std::nullopt;
     }
 };
@@ -513,12 +508,12 @@ public:
                 if (std::holds_alternative<ProblemEdge::Requires>(edge.get_weight())) {
 
                     auto version_set_id = std::get<ProblemEdge::Requires>(edge.get_weight()).version_set_id;
-                    auto target = edge.get_node_to().get_id();
+                    auto target_nx = edge.get_node_to().get_id();
 
                     if (dependencies.find(version_set_id) == dependencies.end()) {
                         dependencies.insert(std::pair(version_set_id, std::vector<NodeIndex>()));
                     }
-                    dependencies.at(version_set_id).push_back(target);
+                    dependencies.at(version_set_id).push_back(target_nx);
                 } else {
                     throw std::runtime_error("Unexpected edge type");
                 }
@@ -532,14 +527,16 @@ public:
             //            }
 
             bool all_deps_installable = true;
-            for (const auto &[version_set_id, targets]: dependencies) {
-                for (auto &target: targets) {
-                    if (installable.find(target) == installable.end()) {
-                        all_deps_installable = false;
+            for (const auto &[version_set_id, deps]: dependencies) {
+                bool found_installable = false;
+                for (auto &target: deps) {
+                    if (installable.find(target) != installable.end()) {
+                        found_installable = true;
                         break;
                     }
                 }
-                if (!all_deps_installable) {
+                if (!found_installable) {
+                    all_deps_installable = false;
                     break;
                 }
             }
@@ -568,39 +565,57 @@ public:
             std::cout << "Unresolved node not found" << std::endl;
             return missing;
         }
+
         missing.insert(unresolved_node.value());
+
         DfsPostOrder<ProblemNodeVariant, ProblemEdgeVariant> dfs(graph, root_node);
         while (auto optional_node_index = dfs.next()) {
             auto node_index = optional_node_index.value();
+
+            //let outgoing_conflicts = self
+            //                .graph
+            //                .edges_directed(nx, Direction::Outgoing)
+            //                .any(|e| matches!(e.weight(), ProblemEdge::Conflict(_)));
+
             bool outgoing_conflicts = false;
             for (auto &edge: graph.outgoing_edges(node_index)) {
-                if (edge.get_node_from().get_id() == optional_node_index) {
-                    if (std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight())) {
-                        outgoing_conflicts = true;
-                        break;
-                    }
-                }
-            }
-            if (outgoing_conflicts) {
-                continue;
-            }
-            std::unordered_map<VersionSetId, NodeIndex> dependencies;
-            for (auto &edge: graph.outgoing_edges(node_index)) {
-                if (edge.get_node_from().get_id() == optional_node_index) {
-                    if (std::holds_alternative<ProblemEdge::Requires>(edge.get_weight())) {
-                        dependencies.insert(std::pair(std::get<ProblemEdge::Requires>(edge.get_weight()).version_set_id,
-                                                      edge.get_node_to().get_id()));
-                    }
-                }
-            }
-            bool all_deps_missing = true;
-            for (auto &[version_set_id, target]: dependencies) {
-                if (missing.find(target) == missing.end()) {
-                    all_deps_missing = false;
+                if (std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight())) {
+                    outgoing_conflicts = true;
                     break;
                 }
             }
-            if (all_deps_missing) {
+            if (outgoing_conflicts) {
+                // Nodes with outgoing conflicts aren't missing
+                continue;
+            }
+
+            // Edges grouped by dependency
+            std::unordered_map<VersionSetId, std::vector<NodeIndex>> dependencies;
+            for (auto &edge: graph.outgoing_edges(node_index)) {
+                if (std::holds_alternative<ProblemEdge::Requires>(edge.get_weight())) {
+                    auto version_set_id = std::get<ProblemEdge::Requires>(edge.get_weight()).version_set_id;
+                    auto target_nx = edge.get_node_to().get_id();
+                    if (dependencies.find(version_set_id) == dependencies.end()) {
+                        dependencies.insert(std::pair(version_set_id, std::vector<NodeIndex>()));
+                    }
+                    dependencies.at(version_set_id).push_back(target_nx);
+                }
+            }
+
+            // Missing if at least one dependency is missing
+            bool found_missing = false;
+            for (auto &[version_set_id, deps]: dependencies) {
+                for (auto &target: deps) {
+                    if (missing.find(target) != missing.end()) {
+                        found_missing = true;
+                        break;
+                    }
+                }
+                if (found_missing) {
+                    break;
+                }
+            }
+            if (found_missing) {
                 missing.insert(optional_node_index.value());
             }
         }
@@ -709,5 +724,10 @@ public:
 
 };
 
+
+void reset_problem_count() {
+    node_count = 0;
+    edge_count = 0;
+}
 
 #endif // PROBLEM_H

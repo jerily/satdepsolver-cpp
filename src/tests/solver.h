@@ -376,7 +376,7 @@ std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &s
                 std::stringstream output;
                 const auto& graph = optional_problem_graph.value();
                 DisplayUnsat<Range<Pack>, std::string> display_unsat(pool, graph);
-                output << display_unsat.to_string() << "\n";
+                output << display_unsat.to_string();
                 return output.str();
             } else if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Cancelled>) {
 //                auto cancelled = std::any_cast<UnsolvableOrCancelled::Cancelled>(arg);
@@ -398,6 +398,7 @@ std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &s
 
 
 std::string solve_unsat(BundleBoxProvider &provider, const std::vector<std::string> &specs) {
+    reset_problem_count();
     std::vector<SolvableId> result;
     std::string message = solve(provider, specs, result);
     assert(result.empty());

@@ -543,9 +543,11 @@ public:
             }
             if (!all_deps_installable) {
                 // No installable options for this dep
-//                std::cout << "No installable options for this dep: " << node_index << std::endl;
+                std::cout << "No installable options for this dep: " << node_index << std::endl;
                 continue;
             }
+
+            std::cout << "installable: " << node_index << std::endl;
 
             // The package is installable
             installable.insert(node_index);
@@ -598,20 +600,29 @@ public:
             }
 
             // Missing if at least one dependency is missing
+            //if dependencies
+            //                .into_iter()
+            //                .any(|(_, mut deps)| deps.all(|(_, target)| missing.contains(&target)))
+
             bool found_missing = false;
             for (auto &[version_set_id, deps]: dependencies) {
+
+                bool all_deps_missing = true;
                 for (auto &target: deps) {
-                    if (missing.find(target) != missing.end()) {
-                        found_missing = true;
+                    if (missing.find(target) == missing.end()) {
+                        all_deps_missing = false;
                         break;
                     }
                 }
-                if (found_missing) {
+
+                if (all_deps_missing) {
+                    found_missing = true;
                     break;
                 }
             }
+
             if (found_missing) {
-                missing.insert(optional_node_index.value());
+                missing.insert(node_index);
             }
         }
         return missing;

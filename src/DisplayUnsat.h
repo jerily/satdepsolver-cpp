@@ -155,7 +155,7 @@ public:
             auto b_installable = std::any_of(b_edges.begin(), b_edges.end(), [this](auto &edge) {
                 return installable_set.find(graph.graph.edges.at(edge).get_node_to().get_id()) != installable_set.end();
             });
-            return a_installable > b_installable;
+            return a_installable < b_installable;
         });
 
         //.map(|(version_set_id, edges)| {
@@ -455,7 +455,7 @@ public:
                             auto b_installable = std::any_of(b_edges.begin(), b_edges.end(), [this](auto &edge) {
                                 return installable_set.find(graph.graph.edges.at(edge).get_node_to().get_id()) != installable_set.end();
                             });
-                            return a_installable > b_installable;
+                            return a_installable < b_installable;
                         });
 
                         std::vector<std::pair<DisplayOpVariant, Indenter>> requirements;

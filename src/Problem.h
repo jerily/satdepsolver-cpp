@@ -257,22 +257,45 @@ template<typename P, typename E>
 class DfsPostOrder {
 private:
     DiGraph<P, E> graph;
-    NodeIndex root_node;
-    std::unordered_set<Node<P>> visited;
+    std::vector<NodeIndex> stack;
+    std::unordered_set<NodeIndex> visited;
+    std::unordered_set<NodeIndex> processed;
 public:
-    DfsPostOrder(DiGraph<P, E> graph, NodeIndex root_node) : graph(std::move(graph)), root_node(root_node) {}
+    DfsPostOrder(DiGraph<P, E> graph, NodeIndex root_node) : graph(std::move(graph)) {
+        reset(root_node);
+    }
 
-    // next node in post-order traversal
+    void reset(NodeIndex root_node) {
+        stack.clear();
+        visited.clear();
+        processed.clear();
+        stack.push_back(root_node);
+    }
+
     std::optional<NodeIndex> next() {
-        if (visited.size() == graph.node_count()) {
-            return std::nullopt;
-        }
-        for (auto &node: graph.nodes) {
-            if (visited.find(node) == visited.end()) {
-                visited.insert(node);
-                return node.get_id();
+        while (!stack.empty()) {
+            auto node_index = stack.back();
+
+            if (processed.find(node_index) != processed.end()) {
+                stack.pop_back();
+                continue;
+            }
+
+            if (visited.find(node_index) == visited.end()) {
+                visited.insert(node_index);
+                auto outgoing_edges = graph.outgoing_edges(node_index);
+                for (auto &edge : outgoing_edges) {
+                    if (visited.find(edge.get_node_to().get_id()) == visited.end()) {
+                        stack.push_back(edge.get_node_to().get_id());
+                    }
+                }
+            } else {
+                processed.insert(node_index);
+                stack.pop_back();
+                return node_index;
             }
         }
+
         return std::nullopt;
     }
 };

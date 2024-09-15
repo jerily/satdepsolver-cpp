@@ -150,7 +150,7 @@ public:
         //            })
 
         std::vector<std::pair<VersionSetId, std::vector<EdgeIndex>>> chunked_vector(chunked.begin(), chunked.end());
-        std::sort(chunked_vector.begin(), chunked_vector.end(), [this](auto &a, auto &b) {
+        std::sort(chunked_vector.begin(), chunked_vector.end(), [this](auto &a, auto &b) -> bool {
             auto a_edges = a.second;
             auto b_edges = b.second;
             auto a_installable = std::any_of(a_edges.begin(), a_edges.end(), [this](auto &edge) {

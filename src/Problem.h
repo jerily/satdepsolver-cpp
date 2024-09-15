@@ -327,7 +327,7 @@ public:
     std::optional<NodeIndex> unresolved_node;
 
     ProblemGraph(DiGraph<ProblemNodeVariant, ProblemEdgeVariant> graph, NodeIndex root_node,
-                 std::optional<NodeIndex> unresolved_node) : graph(graph), root_node(root_node),
+                 std::optional<NodeIndex> unresolved_node) : graph(std::move(graph)), root_node(root_node),
                                                              unresolved_node(unresolved_node) {}
 
     // Simplifies and collapses nodes so that these can be considered the same candidate
@@ -550,12 +550,6 @@ public:
             // The package is installable
             installable.insert(node_index);
         }
-
-        std::cout << "Installable set: ";
-        for (auto &node_index: installable) {
-            std::cout << node_index << " ";
-        }
-        std::cout << std::endl;
 
         return installable;
     }

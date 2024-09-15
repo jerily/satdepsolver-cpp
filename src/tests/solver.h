@@ -392,7 +392,7 @@ std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &s
         for (const auto &solvable: steps) {
             result.push_back(solvable);
         }
-        return nullptr;
+        return "";
     }
 }
 

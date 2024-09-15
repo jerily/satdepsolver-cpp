@@ -137,7 +137,10 @@ public:
         std::unordered_map<VersionSetId, std::vector<EdgeIndex>> chunked;
         for (const auto& edge : requires_edges) {
             auto requires = std::get<ProblemEdge::Requires>(edge.get_weight());
-            chunked[requires.version_set_id].push_back(edge.get_id());
+            if (chunked.find(requires.version_set_id) == chunked.end()) {
+                chunked[requires.version_set_id] = std::vector<EdgeIndex>();
+            }
+            chunked.at(requires.version_set_id).push_back(edge.get_id());
         }
 
         //.sorted_by_key(|(_version_set_id, edges)| {
@@ -415,8 +418,7 @@ public:
                     });
 
                     // let is_leaf = graph.edges(candidate).next().is_none();
-
-                    auto is_leaf = cand_edges.size() == 1;
+                    auto is_leaf = graph.graph.outgoing_edges(node_index).empty();
 
                     if (excluded.has_value()) {
                         auto excluded_reason = excluded.value();

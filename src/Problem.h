@@ -432,6 +432,9 @@ public:
     std::unordered_set<NodeIndex> get_installable_set() const {
         std::unordered_set<NodeIndex> installable;
 
+        // Definition: a package is installable if it does not have any outgoing conflicting edges
+        // and if each of its dependencies has at least one installable option.
+
         DfsPostOrder<ProblemNodeVariant, ProblemEdgeVariant> dfs(graph, root_node);
 
         while (auto optional_node_index = dfs.next()) {
@@ -441,6 +444,9 @@ public:
                 continue;
             }
             auto node_index = optional_node_index.value();
+
+            // Determine any incoming "exclude" edges to the node. This would indicate that the
+            // node is disabled for external reasons.
             bool excluding_edges = false;
             for (auto &edge: graph.incoming_edges(node_index)) {
                 if (std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight())) {
@@ -467,21 +473,56 @@ public:
                 // Nodes with outgoing conflicts aren't in
                 continue;
             }
-            std::unordered_map<VersionSetId, NodeIndex> dependencies;
+
+            // Edges grouped by dependency
+
+            //let dependencies = self
+            //                .graph
+            //                .edges_directed(nx, Direction::Outgoing)
+            //                .map(|e| match e.weight() {
+            //                    ProblemEdge::Requires(version_set_id) => (version_set_id, e.target()),
+            //                    ProblemEdge::Conflict(_) => unreachable!(),
+            //                })
+            //                .chunk_by(|(&version_set_id, _)| version_set_id);
+
+            std::unordered_map<VersionSetId, std::vector<NodeIndex>> dependencies;
             for (auto &edge: graph.outgoing_edges(node_index)) {
                 if (std::holds_alternative<ProblemEdge::Requires>(edge.get_weight())) {
-                    dependencies.insert(std::pair(std::get<ProblemEdge::Requires>(edge.get_weight()).version_set_id,
-                                                  edge.get_node_to().get_id()));
+
+                    auto version_set_id = std::get<ProblemEdge::Requires>(edge.get_weight()).version_set_id;
+                    auto target = edge.get_node_to().get_id();
+
+                    if (dependencies.find(version_set_id) == dependencies.end()) {
+                        dependencies.insert(std::pair(version_set_id, std::vector<NodeIndex>()));
+                    }
+                    dependencies.at(version_set_id).push_back(target);
+                } else {
+                    throw std::runtime_error("Unexpected edge type");
                 }
             }
+
+            //for (_, mut deps) in &dependencies {
+            //                if deps.all(|(_, target)| !installable.contains(&target)) {
+            //                    // No installable options for this dep
+            //                    continue 'outer_loop;
+            //                }
+            //            }
+
             bool all_deps_installable = true;
-            for (const auto &[version_set_id, target]: dependencies) {
-                if (installable.find(target) == installable.end()) {
-                    all_deps_installable = false;
+            for (const auto &[version_set_id, targets]: dependencies) {
+                for (auto &target: targets) {
+                    if (installable.find(target) == installable.end()) {
+                        all_deps_installable = false;
+                        break;
+                    }
+                }
+                if (!all_deps_installable) {
                     break;
                 }
             }
             if (!all_deps_installable) {
+                // No installable options for this dep
+//                std::cout << "No installable options for this dep: " << node_index << std::endl;
                 continue;
             }
 

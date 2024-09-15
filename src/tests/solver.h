@@ -345,40 +345,6 @@ std::string transaction_to_string(const std::shared_ptr<Pool<VS>>& pool, const s
     return output.str();
 }
 
-std::string solve_unsat(BundleBoxProvider &provider, const std::vector<std::string> &specs) {
-    auto requirements = provider.requirements(specs);
-    auto pool = provider.pool;
-    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
-    auto [steps, err] = solver.solve(requirements);
-    if (err.has_value()) {
-        std::string message = std::visit([&](auto &&arg) -> std::string {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Unsolvable>) {
-                auto unsolvable = std::any_cast<UnsolvableOrCancelled::Unsolvable>(arg);
-                auto optional_problem_graph = solver.graph(unsolvable.problem);
-                std::stringstream output;
-                output << "UNSOLVABLE:\n";
-                const auto& graph = optional_problem_graph.value();
-                DisplayUnsat<Range<Pack>, std::string> display_unsat(pool, graph);
-                output << display_unsat.to_string() << "\n";
-
-                return output.str();
-            } else if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Cancelled>) {
-//                auto cancelled = std::any_cast<UnsolvableOrCancelled::Cancelled>(arg);
-                return "cancelled!";
-            }
-            return "unreachable!";
-        }, err.value());
-
-        std::cout << "message: " << message << std::endl;
-        return message;
-    } else {
-        auto reason = provider.should_cancel_with_value();
-        return reason.value_or(transaction_to_string(pool, steps));
-    }
-    return "";
-}
-
 // Solve the problem and returns either a solution represented as a string or an error string.
 std::string solve_snapshot(BundleBoxProvider &provider, const std::vector<std::string> &specs) {
     auto requirements = provider.requirements(specs);
@@ -393,6 +359,49 @@ std::string solve_snapshot(BundleBoxProvider &provider, const std::vector<std::s
     } else {
         return transaction_to_string(pool, steps);
     }
+}
+
+
+std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &specs, std::vector<SolvableId> &result) {
+    auto requirements = provider.requirements(specs);
+    auto pool = provider.pool;
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
+    auto [steps, err] = solver.solve(requirements);
+    if (err.has_value()) {
+        std::string message = std::visit([&](auto &&arg) -> std::string {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Unsolvable>) {
+                auto unsolvable = std::any_cast<UnsolvableOrCancelled::Unsolvable>(arg);
+                auto optional_problem_graph = solver.graph(unsolvable.problem);
+                std::stringstream output;
+                const auto& graph = optional_problem_graph.value();
+                DisplayUnsat<Range<Pack>, std::string> display_unsat(pool, graph);
+                output << display_unsat.to_string() << "\n";
+                return output.str();
+            } else if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Cancelled>) {
+//                auto cancelled = std::any_cast<UnsolvableOrCancelled::Cancelled>(arg);
+                return "cancelled!";
+            }
+            return "unreachable!";
+        }, err.value());
+
+        return message;
+    } else {
+//        auto reason = provider.should_cancel_with_value();
+//        return reason.value_or(transaction_to_string(pool, steps));
+        for (const auto &solvable: steps) {
+            result.push_back(solvable);
+        }
+        return nullptr;
+    }
+}
+
+
+std::string solve_unsat(BundleBoxProvider &provider, const std::vector<std::string> &specs) {
+    std::vector<SolvableId> result;
+    std::string message = solve(provider, specs, result);
+    assert(result.empty());
+    return message;
 }
 
 #endif // SOLVER_H

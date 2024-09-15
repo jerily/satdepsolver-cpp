@@ -75,42 +75,42 @@ std::string dirname(const char* path) {
 template <typename S>
 bool check_equal_to_snapshot(const char* func, const S& snapshot) {
 
-//char filename[256];
-//snprintf(filename, sizeof(filename), "%s/snapshots/%s.snap", dirname(__FILE__).c_str(), func);
-//FILE *fp = fopen(filename, "r");
-//if (fp == NULL) {
-//fprintf(stderr, "Failed to open snapshot file\n");
-//return false;
-//}
-//
-//// read file
-//char buffer[1024];
-//std::string snapshot_from_file;
-//while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-//snapshot_from_file += buffer;
-//}
-//
-//std::set<std::string> snapshot_lines;
-//std::set<std::string> snapshot_from_file_lines;
-//
-//std::istringstream snapshot_stream(snapshot);
-//std::string line;
-//while (std::getline(snapshot_stream, line)) {
-//snapshot_lines.insert(line);
-//}
-//
-//std::istringstream snapshot_from_file_stream(snapshot_from_file);
-//while (std::getline(snapshot_from_file_stream, line)) {
-//snapshot_from_file_lines.insert(line);
-//}
-//
-//if (snapshot_lines != snapshot_from_file_lines) {
-//fprintf(stderr, "Snapshot from file: %s\n", snapshot_from_file.c_str());
-//fprintf(stderr, "Snapshot: %s\n", snapshot.c_str());
-//return false;
-//}
+    char filename[256];
+    snprintf(filename, sizeof(filename), "%s/snapshots/%s.snap", dirname(__FILE__).c_str(), func);
+    FILE *fp = fopen(filename, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "Failed to open snapshot file\n");
+        return false;
+    }
 
-return true;
+// read file
+    char buffer[1024];
+    std::string snapshot_from_file;
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        snapshot_from_file += buffer;
+    }
+
+    std::set<std::string> snapshot_lines;
+    std::set<std::string> snapshot_from_file_lines;
+
+    std::istringstream snapshot_stream(snapshot);
+    std::string line;
+    while (std::getline(snapshot_stream, line)) {
+        snapshot_lines.insert(line);
+    }
+
+    std::istringstream snapshot_from_file_stream(snapshot_from_file);
+    while (std::getline(snapshot_from_file_stream, line)) {
+        snapshot_from_file_lines.insert(line);
+    }
+
+    if (snapshot_lines != snapshot_from_file_lines) {
+        fprintf(stderr, "Snapshot from file: %s\n", snapshot_from_file.c_str());
+        fprintf(stderr, "Snapshot: %s\n", snapshot.c_str());
+        return false;
+    }
+
+    return true;
 }
 
 void test_resolve_with_concurrent_metadata_fetching() {

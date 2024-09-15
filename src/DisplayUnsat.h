@@ -293,8 +293,6 @@ public:
                             return std::make_pair(DisplayOp::Candidate{graph.graph.edges.at(edge).get_node_to().get_id()}, node_indenter_pair.second.push_level());
                         });
 
-                        std::cout << "children size: " << children.size() << std::endl;
-
                         std::vector<std::pair<DisplayOpVariant, Indenter>> deduplicated_children;
                         std::unordered_set<SolvableId> merged_and_seen;
 
@@ -304,8 +302,6 @@ public:
                             }
                             auto child_node = std::get<DisplayOp::Candidate>(child.first);
                             auto child_node_index = child_node.node_index;
-
-                            std::cout << "child_node_index: " << child_node_index << std::endl;
 
                             auto payload = graph.graph.get_node(child_node_index).get_payload();
                             auto solvable_id = std::get<ProblemNode::Solvable>(payload).solvable;

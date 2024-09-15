@@ -176,8 +176,6 @@ public:
             return std::make_pair(DisplayOp::Requirement{pair.first, pair.second}, indenter.push_level());
         });
 
-        std::cout << "stack size: " << stack.size() << std::endl;
-
         if (!stack.empty()) {
             // Mark the first element of the stack as not having any remaining siblings
             stack[0].second.set_last();

@@ -714,7 +714,7 @@ public:
 
     NodeIndex
     add_node(DiGraph<ProblemNodeVariant, ProblemEdgeVariant> &graph, std::unordered_map<SolvableId, NodeIndex> &nodes,
-             SolvableId solvable_id) {
+             const SolvableId& solvable_id) {
         if (nodes.find(solvable_id) == nodes.end()) {
             auto node_index = graph.add_node(ProblemNode::Solvable{solvable_id});
             nodes.insert(std::pair(solvable_id, node_index));

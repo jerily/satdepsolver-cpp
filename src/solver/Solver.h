@@ -1268,7 +1268,7 @@ public:
     }
 
     std::optional<ProblemGraph> graph(Problem& problem) {
-        auto graph = DiGraph<ProblemNodeVariant, ProblemEdgeVariant>();
+        DiGraph<ProblemNodeVariant, ProblemEdgeVariant> graph;
         std::unordered_map<SolvableId, NodeIndex> nodes;
         std::unordered_map<StringId, NodeIndex> excluded_nodes;
 
@@ -1277,6 +1277,7 @@ public:
 
         for (const auto& clause_id: problem.clauses) {
             auto clause = clauses_[clause_id];
+
             std::visit([this, &problem, &graph, &nodes, &excluded_nodes, &root_node, &unresolved_node_index](auto &&arg) {
                 using T = std::decay_t<decltype(arg)>;
 
@@ -1293,7 +1294,7 @@ public:
                     }
                     graph.add_edge(package_node, graph.get_node(excluded_node->second), ProblemEdge::Conflict{ConflictCause::Excluded{}});
                 } else if constexpr (std::is_same_v<T, Clause::Learnt>) {
-                    // unreachable
+                    throw std::runtime_error("Learnt clauses should not be part of the problem graph");
                 } else if constexpr (std::is_same_v<T, Clause::Requires>) {
                     auto clause_variant = std::any_cast<Clause::Requires>(arg);
                     auto package_node_index = problem.add_node(graph, nodes, clause_variant.parent);

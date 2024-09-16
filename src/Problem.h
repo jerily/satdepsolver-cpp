@@ -171,7 +171,7 @@ public:
 
     std::vector<Edge<P, W>> incoming_edges(NodeIndex nodeIndex) const {
         std::vector<Edge<P, W>> incoming;
-        for (auto edge: edges) {
+        for (const auto& edge: edges) {
             if (edge.get_node_to().get_id() == nodeIndex) {
                 incoming.push_back(edge);
             }
@@ -181,7 +181,7 @@ public:
 
     std::vector<Edge<P, W>> outgoing_edges(NodeIndex nodeIndex) const {
         std::vector<Edge<P, W>> outgoing;
-        for (auto edge: edges) {
+        for (const auto& edge: edges) {
             if (edge.get_node_from().get_id() == nodeIndex) {
                 outgoing.push_back(edge);
             }
@@ -258,8 +258,8 @@ class DfsPostOrder {
 private:
     DiGraph<P, E> graph;
     std::vector<NodeIndex> stack;
-    std::unordered_set<NodeIndex> visited;
-    std::unordered_set<NodeIndex> processed;
+    std::unordered_set<NodeIndex> discovered;
+    std::unordered_set<NodeIndex> finished;
 public:
     DfsPostOrder(DiGraph<P, E> graph, NodeIndex root_node) : graph(std::move(graph)) {
         reset(root_node);
@@ -267,27 +267,30 @@ public:
 
     void reset(NodeIndex root_node) {
         stack.clear();
-        visited.clear();
-        processed.clear();
+        discovered.clear();
+        finished.clear();
         stack.push_back(root_node);
     }
 
-    // implement dfs post order using two stacks and make sure that the root node is the last one
+    // Post-order Depth-First Search (DFS) is our final tree traversal algorithm
+    // that explores nodes systematically, starting from the leaves and moving towards the root.
+    // The algorithm is called post-order because it visits the root after its children.
+
     std::optional<NodeIndex> next() {
         while (!stack.empty()) {
             auto node_index = stack.back();
-            if (visited.find(node_index) == visited.end()) {
-                visited.insert(node_index);
+            if (discovered.find(node_index) == discovered.end()) {
+                discovered.insert(node_index);
                 for (auto &edge: graph.outgoing_edges(node_index)) {
-                    auto target_node_index = edge.get_node_to().get_id();
-                    if (visited.find(target_node_index) == visited.end()) {
-                        stack.push_back(target_node_index);
+                    auto target = edge.get_node_to().get_id();
+                    if (discovered.find(target) == discovered.end()) {
+                        stack.push_back(target);
                     }
                 }
             } else {
                 stack.pop_back();
-                if (processed.find(node_index) == processed.end()) {
-                    processed.insert(node_index);
+                if (finished.find(node_index) == finished.end()) {
+                    finished.insert(node_index);
                     return node_index;
                 }
             }
@@ -479,6 +482,7 @@ public:
             }
             if (excluding_edges) {
                 // Nodes with incoming disabling edges aren't installable
+                std::cout << "Nodes with incoming disabling edges aren't installable: " << node_index << std::endl;
                 continue;
             }
             bool outgoing_conflicts = false;
@@ -490,6 +494,7 @@ public:
             }
             if (outgoing_conflicts) {
                 // Nodes with outgoing conflicts aren't in
+                std::cout << "Nodes with outgoing conflicts aren't installable: " << node_index << std::endl;
                 continue;
             }
 

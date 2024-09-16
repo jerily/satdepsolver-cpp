@@ -422,9 +422,21 @@ public:
                     } else if (already_installed) {
                         oss << indent << name << " " << version << ", which conflicts with the versions reported above." << std::endl;
                     } else if (constrains_conflict) {
-                        auto candidate_edges = graph.graph.outgoing_edges(node_index);
-                        std::vector<VersionSetId> version_sets;
-                        std::transform(candidate_edges.begin(), candidate_edges.end(), std::back_inserter(version_sets), [](auto &edge) {
+
+                        //let mut version_sets = graph
+                        //                            .edges(candidate)
+                        //                            .flat_map(|e| match e.weight() {
+                        //                                ProblemEdge::Conflict(ConflictCause::Constrains(
+                        //                                    version_set_id,
+                        //                                )) => Some(version_set_id),
+                        //                                _ => None,
+                        //                            })
+                        //                            .dedup()
+                        //                            .peekable();
+
+                        auto candidate_edges = graph.graph.get_edges_for_node(node_index);
+                        std::unordered_set<VersionSetId> version_sets;
+                        std::transform(candidate_edges.begin(), candidate_edges.end(), std::inserter(version_sets, version_sets.end()), [](auto &edge) {
                             return std::visit([](auto &&arg) -> VersionSetId {
                                 using T_arg = std::decay_t<decltype(arg)>;
                                 if constexpr (std::is_same_v<T_arg, ProblemEdge::Conflict>) {
@@ -436,34 +448,32 @@ public:
                             }, edge.get_weight());
                         });
 
-//                        std::copy_if(graph.graph.outgoing_edges(node_index).begin(), graph.graph.outgoing_edges(node_index).end(), [](auto &edge) {
-//                            return std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight()) && std::holds_alternative<ConflictCause::Constrains>(std::get<ProblemEdge::Conflict>(edge.get_weight()).cause);
-//                        });
-
                         oss << indent << name << " " << version << " would constrain" << std::endl;
                         auto temp_indenter = node_indenter_pair.second.push_level();
-                        for (auto &version_set_id : version_sets) {
+                        for (auto it = version_sets.begin(); it != version_sets.end(); ++it) {
+                            auto version_set_id = *it;
                             auto version_set = pool->resolve_version_set(version_set_id);
                             auto version_set_package_name_id = pool->resolve_version_set_package_name(version_set_id);
                             auto version_set_package_name = pool->resolve_package_name(version_set_package_name_id);
 
-//                            if (version_sets.peek().is_none()) {
-//                                temp_indenter.set_last();
-//                            }
+                            if (std::next(it) == version_sets.end()) {
+                                temp_indenter.set_last();
+                            }
+
                             auto temp_indent = temp_indenter.get_indent();
                             oss << temp_indent << name << " " << version_set << ", which conflicts with any installable versions previously reported" << std::endl;
                         }
                     } else {
                         oss << indent << name << " " << version << " would require" << std::endl;
 
-                        std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> chunked_edges;
+                        std::vector<Edge<ProblemNodeVariant, ProblemEdgeVariant>> requires_edges;
                         auto node_outgoing_edges = graph.graph.outgoing_edges(node_index);
-                        std::copy_if(node_outgoing_edges.begin(), node_outgoing_edges.end(), std::back_inserter(chunked_edges), [](auto &edge) {
+                        std::copy_if(node_outgoing_edges.begin(), node_outgoing_edges.end(), std::back_inserter(requires_edges), [](auto &edge) {
                             return std::holds_alternative<ProblemEdge::Requires>(edge.get_weight());
                         });
 
                         std::unordered_map<VersionSetId, std::vector<EdgeIndex>> chunked;
-                        for (auto &edge : chunked_edges) {
+                        for (auto &edge : requires_edges) {
                             auto requires = std::get<ProblemEdge::Requires>(edge.get_weight());
                             if (chunked.find(requires.version_set_id) == chunked.end()) {
                                 chunked[requires.version_set_id] = std::vector<EdgeIndex>();

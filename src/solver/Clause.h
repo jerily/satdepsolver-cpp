@@ -522,8 +522,6 @@ namespace Clause {
                 decision_tracker
         );
 
-        fprintf(stderr, "============================ requires conflict: %d\n", conflict);
-
         return std::make_pair(from_kind_and_initial_watches(kind, watched_literals), conflict);
     }
 

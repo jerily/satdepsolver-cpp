@@ -575,8 +575,6 @@ public:
                 }
             }
 
-            fprintf(stderr, "new_solvables.size(): %zd\n", new_solvables.size());
-
             if (new_solvables.empty()) {
                 // If no new literals were selected this solution is complete and we can return.
                 fprintf(stderr, "run_sat: level=%d complete solution\n", level);
@@ -935,8 +933,6 @@ public:
             );
         }
 
-        fprintf(stderr, "propagate: learnt_clause_ids_.size(): %zd\n", learnt_clause_ids_.size());
-
         // Assertions derived from learnt rules
         for (auto &learn_clause_id: learnt_clause_ids_) {
             auto clause_id = learn_clause_id;
@@ -1098,6 +1094,8 @@ public:
 
         auto problem = Problem();
 
+        tracing::info("=== ANALYZE UNSOLVABLE");
+
         std::unordered_set<SolvableId> involved;
         auto &clause = clauses_[clause_id];
         Clause::visit_literals(clause.kind_, learnt_clauses_, cache.version_set_to_sorted_candidates,
@@ -1130,17 +1128,6 @@ public:
             Clause::visit_literals(why_clause.kind_, learnt_clauses_, cache.version_set_to_sorted_candidates,
                                    [&decision, this, &involved](const Literal &literal) {
                                        if (literal.eval(decision_tracker_.get_map()) == true) {
-
-                                           auto display_decision_solvable = DisplaySolvable(pool,
-                                                                                            pool->resolve_internal_solvable(
-                                                                                                    decision.solvable_id));
-                                           auto display_literal_solvable = DisplaySolvable(pool,
-                                                                                           pool->resolve_internal_solvable(
-                                                                                                   literal.solvable_id));
-                                           fprintf(stderr, "analyze_unsolvable: !@#$^^&: literal=%s vs decision=%s\n",
-                                                   display_literal_solvable.to_string().c_str(),
-                                                   display_decision_solvable.to_string().c_str());
-
                                            assert(literal.solvable_id == decision.solvable_id);
                                        } else {
                                            involved.insert(literal.solvable_id);
@@ -1209,7 +1196,6 @@ public:
 
             // Select next literal to look at
             while (true) {
-                fprintf(stderr, "analyze: !@#$^^&: undo_last\n");
                 auto [last_decision, last_decision_level] = decision_tracker_.undo_last();
                 conflicting_solvable = last_decision.solvable_id;
                 s_value = last_decision.value;
@@ -1243,10 +1229,6 @@ public:
 
         auto &clause = clauses_[new_clause_id];
         if (clause.has_watches()) {
-
-            auto display_clause = DisplayClause(pool, clause);
-            fprintf(stderr, "analyze: !@#$^^&: adding clause to watch: %s\n", display_clause.to_string().c_str());
-
             watches_.start_watching(clause, new_clause_id);
         }
 
@@ -1261,7 +1243,7 @@ public:
         }
 
         // Should revert at most to the root level
-        auto target_level = back_track_to < 1 ? 1 : back_track_to;
+        auto target_level = back_track_to >= 1 ? 1 : back_track_to;
         decision_tracker_.undo_until(target_level);
         return {target_level, new_clause_id, last_literal};
 

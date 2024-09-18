@@ -83,7 +83,7 @@ private:
 public:
     explicit Node(P payload) : payload(payload), id(node_count++) {}
 
-    P get_payload() {
+    P get_payload() const {
         return payload;
     }
 
@@ -225,6 +225,14 @@ public:
             std::cout << "Edge: " << edge.get_id() << " from: " << edge.get_node_from().get_id() << " to: " << edge.get_node_to().get_id() << std::endl;
         }
     }
+
+    std::vector<NodeIndex> node_indices() const {
+        std::vector<NodeIndex> node_indices;
+        for (auto &node: nodes) {
+            node_indices.push_back(node.get_id());
+        }
+        return node_indices;
+    }
 };
 
 template<typename N, typename E>
@@ -335,7 +343,7 @@ public:
 
     // Simplifies and collapses nodes so that these can be considered the same candidate
     template<typename VS, typename N>
-    std::unordered_map<SolvableId, MergedProblemNode> simplify(std::shared_ptr<Pool<VS, N>> pool) {
+    std::unordered_map<SolvableId, MergedProblemNode> simplify(std::shared_ptr<Pool<VS, N>> pool) const {
         std::unordered_map<SolvableId, MergedProblemNode> merged_candidates;
 
         // Gather information about nodes that can be merged
@@ -631,6 +639,180 @@ public:
             }
         }
         return missing;
+    }
+
+    template<typename VS, typename N>
+    std::string graphviz(std::shared_ptr<Pool<VS, N>> pool, bool do_simplify) const {
+
+        std::stringstream ss;
+
+        //let merged_nodes = if simplify {
+        //            self.simplify(pool)
+        //        } else {
+        //            HashMap::default()
+        //        };
+
+        auto merged_nodes = do_simplify ? simplify(pool) : std::unordered_map<SolvableId, MergedProblemNode>();
+
+        ss << "digraph {";
+
+        for(const auto nx : graph.node_indices()) {
+            //let id = match graph.node_weight(nx).as_ref().unwrap() {
+            //                ProblemNode::Solvable(id) => *id,
+            //                _ => continue,
+            //            };
+
+            const auto &node = graph.get_node(nx);
+            auto optional_id = std::visit([](const auto &&arg) -> std::optional<SolvableId> {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, ProblemNode::Solvable>) {
+                    auto T_arg = std::any_cast<ProblemNode::Solvable>(arg);
+                    return T_arg.solvable;
+                } else {
+                    return std::nullopt;
+                }
+            }, node.get_payload());
+
+            if (!optional_id.has_value()) {
+                continue;
+            }
+
+            auto id = optional_id.value();
+
+            // If this is a merged node, skip it unless it is the first one in the group
+
+            //            if let Some(merged) = merged_nodes.get(&id) {
+            //                if id != merged.ids[0] {
+            //                    continue;
+            //                }
+            //            }
+
+            if (merged_nodes.find(id) != merged_nodes.end()) {
+                auto merged = merged_nodes.at(id);
+                if (id != merged.ids[0]) {
+                    continue;
+                }
+            }
+
+            auto solvable = pool->resolve_internal_solvable(id);
+            std::unordered_set<SolvableId> added_edges;
+            for (const auto& edge : graph.outgoing_edges(nx)) {
+                auto target_payload = edge.get_node_to().get_payload();
+
+                //let color = match edge.weight() {
+                //                    ProblemEdge::Requires(_) if target != ProblemNode::UnresolvedDependency => {
+                //                        "black"
+                //                    }
+                //                    _ => "red",
+                //                };
+
+                std::string color;
+                if (std::holds_alternative<ProblemEdge::Requires>(edge.get_weight()) && !std::holds_alternative<ProblemNode::UnresolvedDependency>(target_payload)) {
+                    color = "black";
+                } else {
+                    color = "red";
+                }
+
+                //let label = match edge.weight() {
+                //                    ProblemEdge::Requires(version_set_id)
+                //                    | ProblemEdge::Conflict(ConflictCause::Constrains(version_set_id)) => {
+                //                        pool.resolve_version_set(*version_set_id).to_string()
+                //                    }
+                //                    ProblemEdge::Conflict(ConflictCause::ForbidMultipleInstances)
+                //                    | ProblemEdge::Conflict(ConflictCause::Locked(_)) => {
+                //                        "already installed".to_string()
+                //                    }
+                //                    ProblemEdge::Conflict(ConflictCause::Excluded) => "excluded".to_string(),
+                //                };
+
+                std::string label = std::visit([&pool](auto &&arg) -> std::string {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, ProblemEdge::Requires>) {
+                        auto T_arg = std::any_cast<ProblemEdge::Requires>(arg);
+                        auto display_vs = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(T_arg.version_set_id));
+                        return display_vs.to_string();
+                    } else if constexpr (std::is_same_v<T, ProblemEdge::Conflict>) {
+                        auto T_arg = std::any_cast<ProblemEdge::Conflict>(arg);
+                        auto conflict_cause = T_arg.conflict_cause;
+                        if (std::holds_alternative<ConflictCause::Constrains>(conflict_cause)) {
+                            auto version_set_id = std::get<ConflictCause::Constrains>(conflict_cause).version;
+                            auto display_vs = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(version_set_id));
+                            return display_vs.to_string();
+                        } else {
+                            return "already installed";
+                        }
+                    } else if constexpr (std::is_same_v<T, ProblemEdge::Conflict>) {
+                        return "excluded";
+                    }
+                    return "unreachable";
+                }, edge.get_weight());
+
+                //let target = match target {
+                //                    ProblemNode::Solvable(mut solvable_2) => {
+                //                        // If the target node has been merged, replace it by the first id in the group
+                //                        if let Some(merged) = merged_nodes.get(&solvable_2) {
+                //                            solvable_2 = merged.ids[0];
+                //
+                //                            // Skip the edge if we would be adding a duplicate
+                //                            if !added_edges.insert(solvable_2) {
+                //                                continue;
+                //                            }
+                //                        }
+                //
+                //                        solvable_2.display(pool).to_string()
+                //                    }
+                //                    ProblemNode::UnresolvedDependency => "unresolved".to_string(),
+                //                    ProblemNode::Excluded(reason) => {
+                //                        format!("reason: {}", pool.resolve_string(reason))
+                //                    }
+                //                };
+
+                std::optional<std::string> optional_target = std::visit([&pool, &merged_nodes, &added_edges](auto &&arg) -> std::optional<std::string> {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, ProblemNode::Solvable>) {
+                        auto T_arg = std::any_cast<ProblemNode::Solvable>(arg);
+                        auto solvable_2 = T_arg.solvable;
+                        if (merged_nodes.find(solvable_2) != merged_nodes.end()) {
+                            auto merged = merged_nodes.at(solvable_2);
+                            solvable_2 = merged.ids[0];
+                            if (!added_edges.insert(solvable_2).second) {
+                                return std::nullopt;
+                            }
+                        }
+                        auto display_solvable = DisplaySolvable<VS,N>(pool, pool->resolve_internal_solvable(solvable_2));
+                        return display_solvable.to_string();
+                    } else if constexpr (std::is_same_v<T, ProblemNode::UnresolvedDependency>) {
+                        return "unresolved";
+                    } else if constexpr (std::is_same_v<T, ProblemNode::Excluded>) {
+                        auto T_arg = std::any_cast<ProblemNode::Excluded>(arg);
+                        auto reason = T_arg.excluded;
+                        return "reason: " + pool->resolve_string(reason);
+                    }
+                    return "unreachable";
+                }, target_payload);
+
+                if (!optional_target.has_value()) {
+                    continue;
+                }
+
+                auto target = optional_target.value();
+
+                //write!(
+                //                    f,
+                //                    "\"{}\" -> \"{}\"[color={color}, label=\"{label}\"];",
+                //                    solvable.display(pool),
+                //                    target
+                //                )?;
+
+                auto display_solvable = DisplaySolvable<VS,N>(pool, solvable);
+                ss << "\"" << display_solvable.to_string() << "\" -> \"" << target << "\"[color=" << color << ", label=\"" << label << "\"];";
+
+            }
+        }
+
+        ss << "}" << std::endl;
+
+        return ss.str();
     }
 };
 

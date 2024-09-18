@@ -166,7 +166,7 @@ class BundleBoxProvider : public DependencyProvider<Range<Pack>, std::string> {
 public:
 
     std::shared_ptr<Pool<Range<Pack>>> pool = std::make_shared<Pool<Range<Pack>>>(Pool<Range<Pack>>());
-    std::unordered_map<std::string, std::unordered_map<Pack, BundleBoxPackageDependencies>> packages;
+    std::map<std::string, std::map<Pack, BundleBoxPackageDependencies>> packages;
     std::unordered_map<std::string, Pack> favored;
     std::unordered_map<std::string, Pack> locked;
     std::unordered_map<std::string, std::unordered_map<Pack, std::string>> excluded;
@@ -211,15 +211,17 @@ public:
         locked.insert(std::make_pair(package_name, Pack(version)));
     }
 
-    void add_package(const std::string &package_name, Pack package_version,
+    void add_package(const std::string &package_name, const Pack& package_version,
                      const std::vector<std::string> &package_dependencies,
                      const std::vector<std::string> &package_constrains) {
         std::vector<Spec> deps;
+        deps.reserve(package_dependencies.size());
         for (const auto &dep: package_dependencies) {
             deps.push_back(Spec::from_str(dep));
         }
 
         std::vector<Spec> cons;
+        cons.reserve(package_constrains.size());
         for (const auto &con: package_constrains) {
             cons.push_back(Spec::from_str(con));
         }
@@ -272,20 +274,23 @@ public:
                 package_candidates.excluded.emplace_back(solvable_id, pool->intern_string(excluded_packs.value().at(pack)));
             }
         }
+
         return package_candidates;
     }
 
     DependenciesVariant get_dependencies(SolvableId solvable) override {
-        // TODO
+        auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable));
+        tracing::info(
+                "get dependencies for %s\n",
+                        display_solvable.to_string().c_str()
+        );
+
         auto candidate = pool->resolve_solvable(solvable);
-        auto display_candidate = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable));
-        fprintf(stderr, ">>>>>>>>>>>>>>>>>>>>> get_dependencies candidate: %s\n", display_candidate.to_string().c_str());
         auto package_name = pool->resolve_package_name(candidate.get_name_id());
         auto pack = candidate.get_inner();
 
         if (pack.cancel_during_get_dependencies) {
             cancel_solving = true;
-            fprintf(stderr, "##################### cancel_during_get_dependencies\n");
             return Dependencies::Unknown{pool->intern_string("cancelled")};
         }
 
@@ -304,9 +309,6 @@ public:
             auto dep_name = pool->intern_package_name(req.name);
             auto dep_spec = pool->intern_version_set(dep_name, req.versions);
 
-            auto display_name = DisplayName(pool, dep_name);
-            auto display_vs = DisplayVersionSet(pool, pool->resolve_version_set(dep_spec));
-            fprintf(stderr, ">>>>>>>>>>>>>>>>>>>>> get_dependencies dep_spec: %s %s\n", display_name.to_string().c_str(), display_vs.to_string().c_str());
             result.requirements.push_back(dep_spec);
         }
 
@@ -375,6 +377,9 @@ std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &s
                 auto optional_problem_graph = solver.graph(unsolvable.problem);
                 std::stringstream output;
                 const auto& graph = optional_problem_graph.value();
+
+                std::cout << graph.graphviz(pool, true) << std::endl;
+
                 DisplayUnsat<Range<Pack>, std::string> display_unsat(pool, graph);
                 output << display_unsat.to_string();
                 return output.str();

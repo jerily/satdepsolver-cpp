@@ -31,7 +31,6 @@ public:
 
     void update_watched(std::optional<ClauseState> &predecessor_clause, ClauseState &clause, const ClauseId& clause_id, size_t watch_index,
                         const SolvableId &previous_watch, const SolvableId &new_watch) {
-        fprintf(stderr, "................................................................ update_watched\n");
         // Remove this clause from its current place in the linked list, because we
         // are no longer watching what brought us here
         if (predecessor_clause.has_value()) {

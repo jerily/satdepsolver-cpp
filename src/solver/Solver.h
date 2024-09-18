@@ -318,11 +318,6 @@ public:
                     for (int i = 0; i < candidates.size(); i++) {
                         for (int j = i + 1; j < candidates.size(); j++) {
 
-                            auto display_candidate = DisplaySolvable(pool,
-                                                                     pool->resolve_internal_solvable(candidates[i]));
-                            auto display_forbidden = DisplaySolvable(pool,
-                                                                     pool->resolve_internal_solvable(candidates[j]));
-
                             auto forbid_clause_id = clauses_.alloc(
                                     Clause::forbid_multiple(candidates[i], candidates[j]));
                             assert(clauses_[forbid_clause_id].has_watches());
@@ -1094,7 +1089,7 @@ public:
 
         auto problem = Problem();
 
-        tracing::info("=== ANALYZE UNSOLVABLE");
+        tracing::info("=== ANALYZE UNSOLVABLE\n");
 
         std::unordered_set<SolvableId> involved;
         auto &clause = clauses_[clause_id];
@@ -1284,13 +1279,17 @@ public:
 
                     auto display_solvable_parent = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(clause_variant.parent));
                     auto display_solvable_requirement = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(clause_variant.requirement));
+//                    auto package_name_id = pool->resolve_version_set_package_name(clause_variant.requirement);
+//                    auto package_name = pool->resolve_package_name(package_name_id);
 
                     auto sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
                     if (!sorted_candidates.empty()) {
                         for (const SolvableId &candidate_id: sorted_candidates) {
+                            auto display_solvable_candidate = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(candidate_id));
+
                             tracing::info("%s requires %s\n",
-                                      display_solvable_parent.to_string().c_str(),
-                                      display_solvable_requirement.to_string().c_str());
+                                          display_solvable_parent.to_string().c_str(),
+                                          display_solvable_candidate.to_string().c_str());
 
                             auto candidate_node_index = problem.add_node(graph, nodes, candidate_id);
                             graph.add_edge(

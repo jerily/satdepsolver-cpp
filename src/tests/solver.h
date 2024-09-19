@@ -279,14 +279,14 @@ public:
     }
 
     DependenciesVariant get_dependencies(SolvableId solvable) override {
-        auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable));
-        tracing::info(
-                "get dependencies for %s\n",
-                        display_solvable.to_string().c_str()
-        );
-
         auto candidate = pool->resolve_solvable(solvable);
         auto package_name = pool->resolve_package_name(candidate.get_name_id());
+
+        tracing::info(
+                "get dependencies for %s\n",
+                        package_name.c_str()
+        );
+
         auto pack = candidate.get_inner();
 
         if (pack.cancel_during_get_dependencies) {

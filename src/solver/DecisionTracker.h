@@ -42,10 +42,10 @@ public:
     }
 
     std::optional<ClauseId> find_clause_for_assignment(const SolvableId& solvable_id) const {
-        auto it = std::find_if(stack.rbegin(), stack.rend(), [solvable_id](const Decision& d) {
+        auto it = std::find_if(stack.begin(), stack.end(), [solvable_id](const Decision& d) {
             return d.solvable_id == solvable_id;
         });
-        if (it != stack.rend()) {
+        if (it != stack.end()) {
             return it->derived_from;
         }
         return std::nullopt;
@@ -85,14 +85,15 @@ public:
 
         propagate_index = stack.size();
 
-        if (!stack.empty()) {
-            const Decision& top_decision = stack.back();
-            return std::make_pair(decision, map.level(top_decision.solvable_id));
-        }
-        return std::make_pair(decision, 0);
+        const Decision& top_decision = stack.back();
+        return std::make_pair(decision, map.level(top_decision.solvable_id));
     }
 
     std::optional<Decision> next_unpropagated() {
+        //        let &decision = self.stack[self.propagate_index..].iter().next()?;
+        //        self.propagate_index += 1;
+        //        Some(decision)
+
         if (propagate_index < stack.size()) {
             return stack[propagate_index++];
         }

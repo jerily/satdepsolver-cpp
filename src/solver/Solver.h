@@ -156,13 +156,13 @@ public:
         std::vector<TaskResultVariant> pending_futures;
         while (true) {
             // Iterate over all pending solvables and request their dependencies.
-//            auto drained_solvables = pending_solvables;
-//            pending_solvables.clear();
-
-            while (!pending_solvables.empty()) {
+            auto drained_pending_solvables = pending_solvables;
+            pending_solvables.erase(pending_solvables.begin(), pending_solvables.end());
+            std::reverse(drained_pending_solvables.begin(), drained_pending_solvables.end());
+            while (!drained_pending_solvables.empty()) {
                 // pop the first element
-                auto solvable_id = pending_solvables.front();
-                pending_solvables.erase(pending_solvables.begin());
+                auto solvable_id = drained_pending_solvables.back();
+                drained_pending_solvables.pop_back();
 
                 auto display_pending = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable_id));
                 tracing::trace(
@@ -179,8 +179,27 @@ public:
                         display_solvable.to_string().c_str()
                 );
 
+                //let get_dependencies_fut = match solvable.inner {
+                //                    SolvableInner::Root => ready(Ok(TaskResult::Dependencies {
+                //                        solvable_id,
+                //                        dependencies: Dependencies::Known(KnownDependencies {
+                //                            requirements: self.root_requirements.clone(),
+                //                            constrains: self.root_constraints.clone(),
+                //                        }),
+                //                    }))
+                //                    .left_future(),
+                //                    SolvableInner::Package(_) => async move {
+                //                        let deps = self.cache.get_or_cache_dependencies(solvable_id).await?;
+                //                        Ok(TaskResult::Dependencies {
+                //                            solvable_id,
+                //                            dependencies: deps.clone(),
+                //                        })
+                //                    }
+                //                    .right_future(),
+                //                };
+
                 auto optional_get_dependencies_fut = std::visit(
-                        [this, &solvable_id](const auto &arg) -> std::optional<TaskResultVariant> {
+                        [this, &solvable_id](auto &&arg) -> std::optional<TaskResultVariant> {
                             using T = std::decay_t<decltype(arg)>;
                             if constexpr (std::is_same_v<T, SolvableInner::Root>) {
                                 auto known_dependencies = KnownDependencies{root_requirements_,
@@ -202,6 +221,11 @@ public:
                 // No more pending results
                 break;
             }
+
+            //let Some(result) = pending_futures.next().await else {
+            //                // No more pending results
+            //                break;
+            //            };
 
             auto result = pending_futures.front();  // pending_futures.next()
             pending_futures.erase(pending_futures.begin());  // pending_futures.pop_front()
@@ -496,7 +520,14 @@ public:
                         level
                 );
 
-                decision_tracker_.try_add_decision(Decision(SolvableId::root(), true, ClauseId::install_root()), level);
+                auto optional_decision = decision_tracker_.try_add_decision(
+                        Decision(SolvableId::root(), true, ClauseId::install_root()),
+                        level
+                );
+
+                if (!optional_decision.has_value()) {
+                    throw std::runtime_error("already decided");
+                }
 
                 auto add_clauses_output = add_clauses_for_solvables({SolvableId::root()});
                 auto optional_clause_id = process_add_clause_output(add_clauses_output);
@@ -511,7 +542,7 @@ public:
             if (propagate_result.has_value()) {
                 // Handle propagation errors
                 auto optional_err = std::visit(
-                        [this, &level](const auto &arg) -> std::optional<UnsolvableOrCancelledVariant> {
+                        [this, &level](auto &&arg) -> std::optional<UnsolvableOrCancelledVariant> {
                             using T = std::decay_t<decltype(arg)>;
                             if constexpr (std::is_same_v<T, PropagationError::Conflict>) {
                                 auto arg_conflict = std::any_cast<PropagationError::Conflict>(arg);
@@ -774,6 +805,7 @@ public:
             // bug: solvable was already decided!
             fprintf(stderr, "bug: solvable was already decided!\n");
             return std::make_pair(level, std::nullopt);
+//            throw std::runtime_error("bug: solvable was already decided!");
         }
 
         return propagate_and_learn(level);
@@ -783,11 +815,6 @@ public:
         while (true) {
             auto propagate_result = propagate(level);
             if (!propagate_result.has_value()) {
-
-                auto display_map = DisplayDecisionMap(pool, decision_tracker_.get_map());
-                std::cout << display_map.to_string().c_str() << std::endl;
-
-
                 // Propagation completed
                 tracing::debug("╘══ Propagation completed\n");
                 return {level, std::nullopt};
@@ -884,7 +911,13 @@ public:
 
         // Optimization: propagate right now, since we know that the clause is a unit clause
         auto decision = literal.satisfying_value();
-        decision_tracker_.try_add_decision(Decision(literal.solvable_id, decision, learned_clause_id), level);
+
+        auto optional_decision = decision_tracker_.try_add_decision(Decision(literal.solvable_id, decision, learned_clause_id), level);
+        if (!optional_decision.has_value()) {
+            throw std::runtime_error("bug: solvable was already decided!");
+        }
+
+
         auto display_literal_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(literal.solvable_id));
         tracing::debug(
                 "├─ Propagate after learn: %s = %d\n",
@@ -919,13 +952,14 @@ public:
                 return std::optional(PropagationError::Conflict{solvable_id, value, clause_id});
             }
 
-            auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable_id));
-
-            tracing::trace(
-                    "├─ Propagate assertion %s = %d\n",
-                    display_solvable.to_string().c_str(),
-                    value
-            );
+            if (decided.value()) {
+                auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable_id));
+                tracing::trace(
+                        "├─ Propagate assertion %s = %d\n",
+                        display_solvable.to_string().c_str(),
+                        value
+                );
+            }
         }
 
         // Assertions derived from learnt rules
@@ -953,30 +987,42 @@ public:
                 return std::optional(PropagationError::Conflict{literal.solvable_id, decision, clause_id});
             }
 
-            auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(literal.solvable_id));
-            tracing::trace(
-                    "├─ Propagate assertion %s = %d\n",
-                    display_solvable.to_string().c_str(),
-                    decision
-            );
+            if (decided.value()) {
+                auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(literal.solvable_id));
+                tracing::trace(
+                        "├─ Propagate assertion %s = %d\n",
+                        display_solvable.to_string().c_str(),
+                        decision
+                );
+            }
         }
 
         // Watched solvables
-        std::optional<Decision> decision;
-        while ((decision = decision_tracker_.next_unpropagated()).has_value()) {
-            SolvableId pkg = decision.value().solvable_id;
+        while (auto optional_decision = decision_tracker_.next_unpropagated()) {
+            SolvableId pkg = optional_decision.value().solvable_id;
 
             // Propagate, iterating through the linked list of clauses that watch this solvable
             std::optional<ClauseId> old_predecessor_clause_id;
             std::optional<ClauseId> predecessor_clause_id;
             ClauseId clause_id = watches_.first_clause_watching_solvable(pkg);
             while (!clause_id.is_null()) {
-                if (predecessor_clause_id.has_value() && predecessor_clause_id.value() == clause_id) {
-                    throw std::runtime_error("Linked list is circular!");
-                }
+                assert(!predecessor_clause_id.has_value() || predecessor_clause_id.value() != clause_id);
 
                 // Get mutable access to both clauses.
-                std::optional<ClauseState> predecessor_clause;
+
+                //let mut clauses = self.clauses.borrow_mut();
+                //                let (predecessor_clause, clause) =
+                //                    if let Some(prev_clause_id) = predecessor_clause_id {
+                //                        let (predecessor_clause, clause) =
+                //                            clauses.get_two_mut(prev_clause_id, clause_id);
+                //                        (Some(predecessor_clause), clause)
+                //                    } else {
+                //                        (None, &mut clauses[clause_id])
+                //                    };
+
+                std::optional<ClauseState> predecessor_clause = predecessor_clause_id.has_value()
+                        ? std::optional(clauses_[predecessor_clause_id.value()])
+                        : std::nullopt;
                 ClauseState &clause = clauses_[clause_id];
 
                 // Update the prev_clause_id for the next run
@@ -1000,9 +1046,12 @@ public:
                     );
 
                     if (optional_variable.has_value()) {
+                        auto variable = optional_variable.value();
+
+                        assert(clause.watched_literals_[0] != variable && clause.watched_literals_[1] != variable);
 
                         watches_.update_watched(predecessor_clause, clause, this_clause_id, watch_index, pkg,
-                                                optional_variable.value());
+                                                variable);
 
                         // Make sure the right predecessor is kept for the next iteration (i.e. the
                         // current clause is no longer a predecessor of the next one; the current
@@ -1016,16 +1065,17 @@ public:
                         Literal remaining_watch = watched_literals[remaining_watch_index];
                         bool satisfying_value = remaining_watch.satisfying_value();
 
-                        auto display_remaining_watch = DisplaySolvable(pool,
-                                                                       pool->resolve_internal_solvable(
-                                                                               remaining_watch.solvable_id));
-                        std::cout << display_remaining_watch.to_string() << std::endl;
+//                        auto display_remaining_watch = DisplaySolvable(pool,
+//                                                                       pool->resolve_internal_solvable(
+//                                                                               remaining_watch.solvable_id));
+//                        std::cout << "remaining_watch: " << display_remaining_watch.to_string() << std::endl;
 
                         auto decided = decision_tracker_.try_add_decision(
                                 Decision(remaining_watch.solvable_id, satisfying_value, this_clause_id), level
                         );
 
                         if (!decided.has_value()) {
+                            std::cout << "conflict" << std::endl;
                             return {PropagationError::Conflict{remaining_watch.solvable_id, true, this_clause_id}};
                         }
 
@@ -1062,7 +1112,7 @@ public:
                                    const ClauseId &clause_id,
                                    Problem &problem, std::unordered_set<ClauseId> &seen) {
         auto &clause = clauses[clause_id];
-        return std::visit([this, &clauses, &learnt_why, &clause_id, &problem, &seen](auto &arg_clause) {
+        return std::visit([this, &clauses, &learnt_why, &clause_id, &problem, &seen](auto &&arg_clause) {
             using T = std::decay_t<decltype(arg_clause)>;
             if constexpr (std::is_same_v<T, Clause::Learnt>) {
                 if (!seen.insert(clause_id).second) {
@@ -1191,6 +1241,7 @@ public:
 
             // Select next literal to look at
             while (true) {
+                std::cout << "undo last" << std::endl;
                 auto [last_decision, last_decision_level] = decision_tracker_.undo_last();
                 conflicting_solvable = last_decision.solvable_id;
                 s_value = last_decision.value;

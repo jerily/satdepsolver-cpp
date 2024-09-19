@@ -242,8 +242,8 @@ public:
         // TODO
 
         assert(requested_candidates.insert(name_id).second);        //            "duplicate get_candidates request"
-
         auto package_name = pool->resolve_package_name(name_id);
+        std::cout << "package: " << package_name << std::endl;
         if (packages.find(package_name) == packages.end()) {
             return std::nullopt;
         }

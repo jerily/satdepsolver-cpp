@@ -153,16 +153,13 @@ public:
 
 
         std::unordered_set<SolvableId> seen(pending_solvables.begin(), pending_solvables.end());
-        std::vector<TaskResultVariant> pending_futures;
+        std::vector<std::future<TaskResultVariant>> pending_futures;
         while (true) {
             // Iterate over all pending solvables and request their dependencies.
-            auto drained_pending_solvables = pending_solvables;
-            pending_solvables.erase(pending_solvables.begin(), pending_solvables.end());
-            std::reverse(drained_pending_solvables.begin(), drained_pending_solvables.end());
-            while (!drained_pending_solvables.empty()) {
+            while (!pending_solvables.empty()) {
                 // pop the first element
-                auto solvable_id = drained_pending_solvables.back();
-                drained_pending_solvables.pop_back();
+                auto solvable_id = pending_solvables.front();
+                pending_solvables.erase(pending_solvables.begin());
 
                 auto display_pending = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable_id));
                 tracing::trace(
@@ -198,23 +195,22 @@ public:
                 //                    .right_future(),
                 //                };
 
-                auto optional_get_dependencies_fut = std::visit(
-                        [this, &solvable_id](auto &&arg) -> std::optional<TaskResultVariant> {
+                std::visit(
+                        [this, &pending_futures, &solvable_id](auto &&arg) -> void {
                             using T = std::decay_t<decltype(arg)>;
                             if constexpr (std::is_same_v<T, SolvableInner::Root>) {
-                                auto known_dependencies = KnownDependencies{root_requirements_,
-                                                                            std::vector<VersionSetId>()};
-                                return TaskResult::Dependencies{solvable_id, Dependencies::Known{known_dependencies}};
+                                pending_futures.emplace_back(std::async(std::launch::deferred, [this, solvable_id]() -> TaskResultVariant {
+                                    auto known_dependencies = KnownDependencies{root_requirements_, {}};
+                                    return TaskResult::Dependencies{solvable_id, Dependencies::Known{known_dependencies}};
+                                }));
                             } else if constexpr (std::is_same_v<T, SolvableInner::Package<typename VS::ValueType>>) {
-                                auto deps = cache.get_or_cache_dependencies(solvable_id);
-                                return TaskResult::Dependencies{solvable_id, deps};
+                                pending_futures.emplace_back(std::async(std::launch::deferred, [this, solvable_id]() -> TaskResultVariant {
+                                    auto deps = cache.get_or_cache_dependencies(solvable_id);
+                                    return TaskResult::Dependencies{solvable_id, deps};
+                                }));
                             }
-                            return std::nullopt;
                         }, solvable.inner);
 
-                if (optional_get_dependencies_fut.has_value()) {
-                    pending_futures.emplace_back(optional_get_dependencies_fut.value());
-                }
             }
 
             if (pending_futures.empty()) {
@@ -227,8 +223,15 @@ public:
             //                break;
             //            };
 
-            auto result = pending_futures.front();  // pending_futures.next()
+            auto result = pending_futures.front().get();;  // pending_futures.next()
             pending_futures.erase(pending_futures.begin());  // pending_futures.pop_front()
+
+//static int count = 0;
+//if (count++ == 1) {
+//    exit(0);
+//}
+//std::cout << "future count: " << count << std::endl;
+
 
             auto continue_p = std::visit([this, &output, &pending_futures, &pending_solvables, &seen](auto &&arg) {
                 using T = std::decay_t<decltype(arg)>;
@@ -288,27 +291,30 @@ public:
                                                 pool->resolve_package_name(dependency_name).c_str()
                                         );
 
-                                        auto package_candidates = cache.get_or_cache_candidates(dependency_name);
-                                        pending_futures.emplace_back(
-                                                TaskResult::Candidates{dependency_name, package_candidates});
+                                        pending_futures.emplace_back(std::async(std::launch::deferred, [this, dependency_name]() -> TaskResultVariant {
+                                            auto package_candidates = cache.get_or_cache_candidates(dependency_name);
+                                            return TaskResult::Candidates{dependency_name, package_candidates};
+                                        }));
                                     }
                                 }
 
                                 for (VersionSetId version_set_id: requirements) {
                                     // Find all the solvable that match for the given version set
-                                    auto sorted_candidates = cache.get_or_cache_sorted_candidates(version_set_id);
-                                    pending_futures.emplace_back(
-                                            TaskResult::SortedCandidates{solvable_id, version_set_id,
-                                                                         sorted_candidates});
+                                    pending_futures.emplace_back(std::async(std::launch::deferred, [this, solvable_id, version_set_id]() -> TaskResultVariant {
+                                        auto sorted_candidates = cache.get_or_cache_sorted_candidates(version_set_id);
+                                        return TaskResult::SortedCandidates{solvable_id, version_set_id,
+                                                                         sorted_candidates};
+                                    }));
                                 }
 
                                 for (VersionSetId version_set_id: constrains) {
                                     // Find all the solvables that match for the given version set
-                                    auto non_matching_candidates = cache.get_or_cache_non_matching_candidates(
-                                            version_set_id);
-                                    pending_futures.emplace_back(
-                                            TaskResult::NonMatchingCandidates{solvable_id, version_set_id,
-                                                                              non_matching_candidates});
+                                    pending_futures.emplace_back(std::async(std::launch::deferred, [this, solvable_id, version_set_id]() -> TaskResultVariant {
+                                        auto non_matching_candidates = cache.get_or_cache_non_matching_candidates(
+                                                version_set_id);
+                                        return TaskResult::NonMatchingCandidates{solvable_id, version_set_id,
+                                                                              non_matching_candidates};
+                                    }));
                                 }
 
                                 return false;
@@ -1289,7 +1295,7 @@ public:
         }
 
         // Should revert at most to the root level
-        auto target_level = back_track_to >= 1 ? 1 : back_track_to;
+        auto target_level = std::max(back_track_to, 1u);
         decision_tracker_.undo_until(target_level);
         return {target_level, new_clause_id, last_literal};
 

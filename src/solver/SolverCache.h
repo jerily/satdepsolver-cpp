@@ -51,39 +51,12 @@ public:
                throw std::runtime_error("Solver cancelled");
             }
 
-            // Check if there is an in-flight request
-            auto in_flight_request = package_name_to_candidates_in_flight.find(package_name);
-            if (in_flight_request != package_name_to_candidates_in_flight.end()) {
-                // Found an in-flight request, wait for that request to finish and return the computed result.
-                in_flight_request->second.get();
-                return candidates[package_name_to_candidates.get_copy(package_name).value()];
-            } else {
-                // Prepare an in-flight notifier for other requests coming in.
-                package_name_to_candidates_in_flight[package_name] = std::make_shared<std::future<PackageCandidates>>();
+            auto package_candidates = provider.get_candidates(package_name).value_or(PackageCandidates());
+            auto package_candidates_id = candidates.alloc(package_candidates);
+            std::cout << "package_candidates_id: " << package_candidates_id.to_usize() << std::endl;
+            package_name_to_candidates.insert_copy(package_name, package_candidates_id);
+            return candidates[package_candidates_id];
 
-                // Otherwise we have to get them from the DependencyProvider
-                auto package_candidates = provider.get_candidates(package_name).value_or(PackageCandidates());
-                // Store information about which solvables dependency information is easy to
-                // retrieve.
-                for (auto hint_candidate : package_candidates.hint_dependencies_available) {
-                    auto idx = hint_candidate.to_usize();
-                    if (hint_dependencies_available.size() <= idx) {
-                        hint_dependencies_available.resize(idx + 1, false);
-                    }
-                    hint_dependencies_available[idx] = true;
-                }
-
-                // Allocate an ID so we can refer to the candidates from everywhere
-                auto package_candidates_id = candidates.alloc(package_candidates);
-                package_name_to_candidates.insert_copy(package_name, package_candidates_id);
-
-                // Remove the in-flight request now that we inserted the result and notify any waiters
-                auto notifier = package_name_to_candidates_in_flight[package_name];
-                package_name_to_candidates_in_flight.erase(package_name);
-// TODO: check                notifier->notify(std::numeric_limits<std::size_t>::max());
-
-                return candidates[package_candidates_id];
-            }
         }
     }
 

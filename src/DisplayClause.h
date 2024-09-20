@@ -41,7 +41,7 @@ public:
             } else if constexpr (std::is_same_v<T, Clause::Learnt>) {
                 auto learnt = std::any_cast<Clause::Learnt>(arg);
                 auto learnt_id = learnt.learnt_clause_id;
-                oss << "learnt clause: " << learnt_id.to_usize() << " ";
+                oss << "learnt clause " << learnt_id.to_string() << " ";
             } else if constexpr (std::is_same_v<T, Clause::Requires>) {
                 auto requires = std::any_cast<Clause::Requires>(arg);
                 auto solvable_id = requires.parent;

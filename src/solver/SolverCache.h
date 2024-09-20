@@ -53,7 +53,6 @@ public:
 
             auto package_candidates = provider.get_candidates(package_name).value_or(PackageCandidates());
             auto package_candidates_id = candidates.alloc(package_candidates);
-            std::cout << "package_candidates_id: " << package_candidates_id.to_usize() << std::endl;
             package_name_to_candidates.insert_copy(package_name, package_candidates_id);
             return candidates[package_candidates_id];
 
@@ -165,8 +164,7 @@ public:
     // either the dependency provider indicated that the dependencies for a solvable are available
     // or the dependencies have already been requested.
     bool are_dependencies_available_for(const SolvableId& solvable) {
-        // TODO: check if this is correct
-        return false;
+//        return false;
         auto dependencies_id = solvable_to_dependencies.get_copy(solvable);
         if (dependencies_id.has_value()) {
             return true;

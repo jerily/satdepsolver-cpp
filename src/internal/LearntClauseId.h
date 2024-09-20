@@ -31,6 +31,12 @@ public:
     bool operator==(const LearntClauseId& other) const {
         return value == other.value;
     }
+
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "LearntClauseId(" << value << ")";
+        return ss.str();
+    }
 };
 
 namespace std {

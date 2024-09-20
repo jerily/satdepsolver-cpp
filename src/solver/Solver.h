@@ -1076,7 +1076,6 @@ public:
                         );
 
                         if (!decided.has_value()) {
-                            std::cout << "conflict" << std::endl;
                             return {PropagationError::Conflict{remaining_watch.solvable_id, true, this_clause_id}};
                         }
 

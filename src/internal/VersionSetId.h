@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cassert>
 #include <functional>
+#include <sstream>
 #include "ArenaId.h"
 
 // The id associated with a VersionSet.
@@ -60,6 +61,13 @@ public:
     bool operator>=(const VersionSetId& vsid) const {
         return value >= vsid.value;
     }
+
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << "VersionSetId(" << value << ")";
+        return ss.str();
+    }
+
 };
 
 

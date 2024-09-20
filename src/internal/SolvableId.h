@@ -6,6 +6,7 @@
 #include <cassert>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include "ArenaId.h"
 
 class SolvableId: ArenaId {
@@ -66,6 +67,11 @@ public:
         return SolvableId(static_cast<std::uint32_t>(x));
     }
 
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << "SolvableId(" << value_ << ")";
+        return ss.str();
+    }
 private:
     uint32_t value_;
 };

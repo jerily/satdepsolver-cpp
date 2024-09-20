@@ -226,13 +226,6 @@ public:
             auto result = pending_futures.front().get();;  // pending_futures.next()
             pending_futures.erase(pending_futures.begin());  // pending_futures.pop_front()
 
-//static int count = 0;
-//if (count++ == 1) {
-//    exit(0);
-//}
-//std::cout << "future count: " << count << std::endl;
-
-
             auto continue_p = std::visit([this, &output, &pending_futures, &pending_solvables, &seen](auto &&arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, TaskResult::Dependencies>) {
@@ -278,11 +271,13 @@ public:
                                     return true;  // continue
                                 }
 
+                                // for version_set_id in chain(requirements.iter(), constrains.iter()).copied()
 
                                 std::vector<VersionSetId> chain;
-                                chain.insert(chain.end(), requirements.begin(), requirements.end());
-                                chain.insert(chain.end(), constrains.begin(), constrains.end());
-                                for (auto &version_set_id: chain) {
+                                chain.reserve(requirements.size() + constrains.size());
+                                std::copy(requirements.begin(), requirements.end(), std::back_inserter(chain));
+                                std::copy(constrains.begin(), constrains.end(), std::back_inserter(chain));
+                                for (const auto &version_set_id: chain) {
                                     auto dependency_name = pool->resolve_version_set_package_name(version_set_id);
 
                                     if (clauses_added_for_package_.insert(dependency_name).second) {
@@ -298,7 +293,7 @@ public:
                                     }
                                 }
 
-                                for (VersionSetId version_set_id: requirements) {
+                                for (const auto &version_set_id: requirements) {
                                     // Find all the solvable that match for the given version set
                                     pending_futures.emplace_back(std::async(std::launch::deferred, [this, solvable_id, version_set_id]() -> TaskResultVariant {
                                         auto sorted_candidates = cache.get_or_cache_sorted_candidates(version_set_id);
@@ -1178,7 +1173,8 @@ public:
 
             Clause::visit_literals(why_clause.kind_, learnt_clauses_, cache.version_set_to_sorted_candidates,
                                    [&decision, this, &involved](const Literal &literal) {
-                                       if (literal.eval(decision_tracker_.get_map()) == true) {
+                                       auto optional_eval = literal.eval(decision_tracker_.get_map());
+                                       if (optional_eval.has_value() && optional_eval.value()) {
                                            assert(literal.solvable_id == decision.solvable_id);
                                        } else {
                                            involved.insert(literal.solvable_id);
@@ -1247,7 +1243,6 @@ public:
 
             // Select next literal to look at
             while (true) {
-                std::cout << "undo last" << std::endl;
                 auto [last_decision, last_decision_level] = decision_tracker_.undo_last();
                 conflicting_solvable = last_decision.solvable_id;
                 s_value = last_decision.value;
@@ -1334,18 +1329,23 @@ public:
                     auto package_node_index = problem.add_node(graph, nodes, clause_variant.parent);
                     auto package_node = graph.get_node(package_node_index);
 
-                    auto display_solvable_parent = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(clause_variant.parent));
-                    auto display_solvable_requirement = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(clause_variant.requirement));
+//                    auto display_solvable_parent = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(clause_variant.parent));
+//                    auto display_solvable_requirement = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(clause_variant.requirement));
 //                    auto package_name_id = pool->resolve_version_set_package_name(clause_variant.requirement);
 //                    auto package_name = pool->resolve_package_name(package_name_id);
 
                     auto sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
                     if (!sorted_candidates.empty()) {
+                        std::cout << "--- here ---" << std::endl;
                         for (const SolvableId &candidate_id: sorted_candidates) {
-                            auto display_solvable_candidate = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(candidate_id));
 
-                            tracing::info("%s requires %s\n",
+                            auto display_solvable_parent = DisplaySolvable(pool, pool->resolve_internal_solvable(clause_variant.parent));
+                            auto display_solvable_candidate = DisplaySolvable(pool, pool->resolve_internal_solvable(candidate_id));
+
+                            tracing::info("%s (%s) requires %s (%s)\n",
+                                          clause_variant.parent.to_string().c_str(),
                                           display_solvable_parent.to_string().c_str(),
+                                          candidate_id.to_string().c_str(),
                                           display_solvable_candidate.to_string().c_str());
 
                             auto candidate_node_index = problem.add_node(graph, nodes, candidate_id);
@@ -1356,8 +1356,8 @@ public:
                         }
                     } else {
                         tracing::info("%s requires %s, which has no candidates\n",
-                                      display_solvable_parent.to_string().c_str(),
-                                      display_solvable_requirement.to_string().c_str());
+                                      clause_variant.parent.to_string().c_str(),
+                                      clause_variant.requirement.to_string().c_str());
 
                         graph.add_edge(
                                 package_node,

@@ -239,11 +239,8 @@ public:
     }
 
     std::optional<PackageCandidates> get_candidates(NameId name_id) override {
-        // TODO
-
         assert(requested_candidates.insert(name_id).second);        //            "duplicate get_candidates request"
         auto package_name = pool->resolve_package_name(name_id);
-        std::cout << "package: " << package_name << std::endl;
         if (packages.find(package_name) == packages.end()) {
             return std::nullopt;
         }
@@ -261,6 +258,7 @@ public:
                                                                              : std::nullopt;
 
         for (const auto &[pack, _]: package) {
+
             auto solvable_id = pool->intern_solvable(name_id, pack);
             package_candidates.candidates.push_back(solvable_id);
             if (favored_pack.has_value() && favored_pack.value() == pack) {

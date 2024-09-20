@@ -37,6 +37,7 @@ public:
         installable_set = graph.get_installable_set();
         missing_set = graph.get_missing_set();
 
+        /*
         for (auto installable : installable_set) {
             auto node = graph.graph.get_node(installable);
             auto payload = node.get_payload();
@@ -61,7 +62,7 @@ public:
                 std::cout << "dfs-here: " << node_index << ": " << display_solvable.to_string() << std::endl;
             }
         }
-
+        */
     }
 
     friend std::ostream &operator<<(std::ostream &os, const DisplayUnsat &display_unsat) {

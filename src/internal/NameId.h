@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cassert>
 #include <memory>
+#include <sstream>
 #include "ArenaId.h"
 
 // The id associated to a package name
@@ -38,6 +39,12 @@ public:
 
     bool operator<(const NameId& other) const {
         return value < other.value;
+    }
+
+    std::string to_string() {
+        std::stringstream ss;
+        ss << "NameId(" << value << ")";
+        return ss.str();
     }
 };
 

@@ -162,11 +162,65 @@ struct BundleBoxPackageDependencies {
 
 };
 
+
+template <typename Key, typename Value>
+class OrderedMap {
+public:
+    // Insert a key-value pair
+    void insert(const Key& key, const Value& value) {
+        if (map.find(key) == map.end()) {
+            order.push_back(key);
+        }
+        map[key] = value;
+    }
+
+    // Access value by key
+    Value& operator[](const Key& key) {
+        return map[key];
+    }
+
+    Value& at(const Key& key) {
+        return map.at(key);
+    }
+
+    // Check if key exists
+    bool contains(const Key& key) const {
+        return map.find(key) != map.end();
+    }
+
+    // Get the insertion order
+    const std::vector<Key>& get_order() const {
+        return order;
+    }
+
+    // Print the map in insertion order
+    void print() const {
+        for (const auto& key : order) {
+            std::cout << key << ": " << map.at(key) << std::endl;
+        }
+    }
+
+    // Get the size of the map
+    size_t size() const {
+        return map.size();
+    }
+
+    auto keys() const {
+        return order;
+    }
+
+private:
+    std::unordered_map<Key, Value> map;
+    std::vector<Key> order;
+};
+
+
+
 class BundleBoxProvider : public DependencyProvider<Range<Pack>, std::string> {
 public:
 
     std::shared_ptr<Pool<Range<Pack>>> pool = std::make_shared<Pool<Range<Pack>>>(Pool<Range<Pack>>());
-    std::map<std::string, std::map<Pack, BundleBoxPackageDependencies>> packages;
+    std::unordered_map<std::string, OrderedMap<Pack, BundleBoxPackageDependencies>> packages;
     std::unordered_map<std::string, Pack> favored;
     std::unordered_map<std::string, Pack> locked;
     std::unordered_map<std::string, std::unordered_map<Pack, std::string>> excluded;
@@ -226,7 +280,7 @@ public:
             cons.push_back(Spec::from_str(con));
         }
 
-        packages[package_name].insert(std::make_pair(package_version, BundleBoxPackageDependencies{deps, cons}));
+        packages[package_name].insert(package_version, BundleBoxPackageDependencies{deps, cons});
     }
 
     void sort_candidates(std::vector<SolvableId> &solvables) override {
@@ -245,7 +299,7 @@ public:
             return std::nullopt;
         }
 
-        auto package = packages.at(package_name);
+        const auto &package = packages.at(package_name);
         PackageCandidates package_candidates;
         package_candidates.candidates.reserve(package.size());
 
@@ -257,9 +311,10 @@ public:
         auto excluded_packs = excluded.find(package_name) != excluded.cend() ? std::optional(excluded.at(package_name))
                                                                              : std::nullopt;
 
-        for (const auto &[pack, _]: package) {
+        for (const auto &pack : package.keys()) {
 
             auto solvable_id = pool->intern_solvable(name_id, pack);
+
             package_candidates.candidates.push_back(solvable_id);
             if (favored_pack.has_value() && favored_pack.value() == pack) {
                 package_candidates.favored = std::optional(solvable_id);

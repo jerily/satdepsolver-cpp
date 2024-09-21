@@ -470,7 +470,7 @@ public:
         while (auto optional_node_index = dfs.next()) {
             if (unresolved_node == optional_node_index) {
                 // The unresolved node isn't installable
-                std::cout << "Unresolved node isn't installable" << std::endl;
+//                std::cout << "Unresolved node isn't installable" << std::endl;
                 continue;
             }
             auto node_index = optional_node_index.value();
@@ -490,7 +490,7 @@ public:
             }
             if (excluding_edges) {
                 // Nodes with incoming disabling edges aren't installable
-                std::cout << "Nodes with incoming disabling edges aren't installable: " << node_index << std::endl;
+//                std::cout << "Nodes with incoming disabling edges aren't installable: " << node_index << std::endl;
                 continue;
             }
             bool outgoing_conflicts = false;
@@ -502,7 +502,7 @@ public:
             }
             if (outgoing_conflicts) {
                 // Nodes with outgoing conflicts aren't in
-                std::cout << "Nodes with outgoing conflicts aren't installable: " << node_index << std::endl;
+//                std::cout << "Nodes with outgoing conflicts aren't installable: " << node_index << std::endl;
                 continue;
             }
 
@@ -556,11 +556,9 @@ public:
             }
             if (!all_deps_installable) {
                 // No installable options for this dep
-                std::cout << "No installable options for this dep: " << node_index << std::endl;
+//                std::cout << "No installable options for this dep: " << node_index << std::endl;
                 continue;
             }
-
-            std::cout << "installable: " << node_index << std::endl;
 
             // The package is installable
             installable.insert(node_index);
@@ -572,7 +570,7 @@ public:
     std::unordered_set<NodeIndex> get_missing_set() {
         std::unordered_set<NodeIndex> missing;
         if (!unresolved_node.has_value()) {
-            std::cout << "Unresolved node not found" << std::endl;
+//            std::cout << "Unresolved node not found" << std::endl;
             return missing;
         }
 

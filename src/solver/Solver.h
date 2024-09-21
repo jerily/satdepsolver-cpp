@@ -712,13 +712,34 @@ public:
 
             // Consider only clauses in which no candidates have been installed
             auto optional_candidates = cache.version_set_to_sorted_candidates.get(deps);
+            auto candidates = optional_candidates.value();
 
             // Either find the first assignable candidate or determine that one of the candidates is
             // already assigned in which case the clause has already been satisfied.
+
+            //let candidate = candidates.iter().try_fold(
+            //                (None, 0),
+            //                |(first_selectable_candidate, selectable_candidates), &candidate| {
+            //                    let assigned_value = self.decision_tracker.assigned_value(candidate);
+            //                    match assigned_value {
+            //                        Some(true) => ControlFlow::Break(()),
+            //                        Some(false) => ControlFlow::Continue((
+            //                            first_selectable_candidate,
+            //                            selectable_candidates,
+            //                        )),
+            //                        None => ControlFlow::Continue((
+            //                            first_selectable_candidate.or(Some(candidate)),
+            //                            selectable_candidates + 1,
+            //                        )),
+            //                    }
+            //                },
+            //            );
+
+            // pair of first_selectable_candidate and selectable_candidates
             std::pair<std::optional<SolvableId>, uint32_t> candidate = {std::nullopt, 0};
             bool breakFlag = false;
 
-            for (const auto &candidate_value: optional_candidates.value()) {
+            for (const auto &candidate_value: candidates) {
                 auto optional_assigned_value = decision_tracker_.assigned_value(candidate_value);
                 if (optional_assigned_value.has_value()) {
                     if (optional_assigned_value.value() == true) {
@@ -726,12 +747,29 @@ public:
                         break;
                     }
                 } else {
+                    // first_selectable_candidate.or(Some(candidate))
                     if (!candidate.first.has_value()) {
                         candidate.first = std::optional(candidate_value);
                     }
                     candidate.second++;
                 }
             }
+
+
+            //match candidate {
+            //                ControlFlow::Continue((Some(candidate), count)) => {
+            //                    let possible_decision = (candidate, solvable_id, clause_id);
+            //                    best_decision = Some(match best_decision {
+            //                        None => (count, possible_decision),
+            //                        Some((best_count, _)) if count < best_count => {
+            //                            (count, possible_decision)
+            //                        }
+            //                        Some(best_decision) => best_decision,
+            //                    })
+            //                }
+            //                ControlFlow::Break(_) => continue,
+            //                ControlFlow::Continue((None, _)) => unreachable!("when we get here it means that all candidates have been assigned false. This should not be able to happen at this point because during propagation the solvable should have been assigned false as well."),
+            //            }
 
             if (breakFlag) {
                 continue;
@@ -1335,7 +1373,6 @@ public:
 
                     auto sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
                     if (!sorted_candidates.empty()) {
-                        std::cout << "--- here ---" << std::endl;
                         for (const SolvableId &candidate_id: sorted_candidates) {
 
                             auto display_solvable_parent = DisplaySolvable(pool, pool->resolve_internal_solvable(clause_variant.parent));

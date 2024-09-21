@@ -1338,13 +1338,13 @@ public:
         std::unordered_map<SolvableId, NodeIndex> nodes;
         std::unordered_map<StringId, NodeIndex> excluded_nodes;
 
-        auto root_node = problem.add_node(graph, nodes, SolvableId::root());
+        auto root_node_index = problem.add_node(graph, nodes, SolvableId::root());
         auto unresolved_node_index = graph.add_node(ProblemNode::UnresolvedDependency{});
 
         for (const auto& clause_id: problem.clauses) {
             auto clause = clauses_[clause_id];
 
-            std::visit([this, &problem, &graph, &nodes, &excluded_nodes, &root_node, &unresolved_node_index](auto &&arg) {
+            std::visit([this, &problem, &graph, &nodes, &excluded_nodes, &root_node_index, &unresolved_node_index](auto &&arg) {
                 using T = std::decay_t<decltype(arg)>;
 
                 if constexpr (std::is_same_v<T, Clause::InstallRoot>) {
@@ -1419,7 +1419,7 @@ public:
                     auto clause_variant = std::any_cast<Clause::Lock>(arg);
 
                     auto node2_id = problem.add_node(graph, nodes, clause_variant.other_candidate);
-                    graph.add_edge(graph.get_node(root_node), graph.get_node(node2_id), ProblemEdge::Conflict{ConflictCause::Locked{clause_variant.locked_candidate}});
+                    graph.add_edge(graph.get_node(root_node_index), graph.get_node(node2_id), ProblemEdge::Conflict{ConflictCause::Locked{clause_variant.locked_candidate}});
                 }
 
             }, clause.kind_);
@@ -1439,14 +1439,14 @@ public:
 
         // Sanity check: all nodes are reachable from root
         std::unordered_set<NodeIndex> visited_nodes;
-        auto bfs = Bfs(graph, root_node);
+        auto bfs = Bfs(graph, root_node_index);
         while (const auto& optional_node_index = bfs.next()) {
             visited_nodes.insert(optional_node_index.value());
         }
 
 
         assert(graph.node_count() == visited_nodes.size());
-        return ProblemGraph(graph, root_node, final_unresolved_node);
+        return ProblemGraph(graph, root_node_index, final_unresolved_node);
     }
 
 };

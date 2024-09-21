@@ -93,13 +93,13 @@ public:
         });
 
         if (!top_level_missing.empty()) {
-            return fmt_graph(oss, top_level_missing, false);
+            fmt_graph(oss, top_level_missing, false);
         }
 
         if (!top_level_conflicts.empty()) {
             oss << "The following packages are incompatible" << std::endl;
             try {
-                return fmt_graph(oss, top_level_conflicts, true);
+                fmt_graph(oss, top_level_conflicts, true);
             } catch (std::exception &e) {
                 oss << "Error: " << e.what() << std::endl;
             }
@@ -108,10 +108,8 @@ public:
             auto edges = graph.graph.outgoing_edges(graph.root_node);
             auto indenter = Indenter(true);
 
-            for (auto &edge : edges) {
-                auto child_order = std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight()) ? ChildOrder::HasRemainingSiblings : ChildOrder::Last;
-                auto temp_indenter = indenter.push_level_with_order(child_order);
-                auto indent = temp_indenter.get_indent();
+            for (auto it = edges.begin(); it != edges.end(); ++it) {
+                const auto& edge = *it;
 
                 //                let conflict = match e.weight() {
                 //                    ProblemEdge::Requires(_) => continue,
@@ -122,16 +120,21 @@ public:
                     continue;
                 }
 
+                auto peek_next = std::next(it);
+                auto child_order = std::holds_alternative<ProblemEdge::Conflict>(peek_next->get_weight()) ? ChildOrder::HasRemainingSiblings : ChildOrder::Last;
+                indenter = indenter.push_level_with_order(child_order);
+                auto indent = indenter.get_indent();
+
                 auto conflict = std::get<ProblemEdge::Conflict>(edge.get_weight()).conflict_cause;
 
                 if (std::holds_alternative<ConflictCause::Constrains>(conflict) || std::holds_alternative<ConflictCause::ForbidMultipleInstances>(conflict)) {
                     throw std::runtime_error("Unreachable");
                 } else if (std::holds_alternative<ConflictCause::Locked>(conflict)) {
                     auto locked_solvable = std::get<ConflictCause::Locked>(conflict).solvable;
-                    auto locked = pool->resolve_internal_solvable(locked_solvable);
-                    auto display_locked_solvable = DisplaySolvable<VS, N>(pool, locked);
-//                    auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, locked);
-                    oss << indent << display_locked_solvable.to_string() << " " << " is locked, but another version is required as reported above" << std::endl;
+                    auto locked = pool->resolve_solvable(locked_solvable);
+                    auto display_name = DisplayName<VS, N>(pool, locked.get_name_id());
+                    auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, {locked_solvable});
+                    oss << indent << display_name.to_string() << " " << display_merged_solvable.to_string() << " is locked, but another version is required as reported above" << std::endl;
                 } else if (std::holds_alternative<ConflictCause::Excluded>(conflict)) {
                     continue;
                 }

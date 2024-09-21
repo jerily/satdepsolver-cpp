@@ -307,7 +307,7 @@ public:
             std::array<SolvableId, 2> watched_literals,
             std::array<ClauseId, 2> next_watches,
             ClauseVariant kind
-    ) : watched_literals_(watched_literals), next_watches_(next_watches), kind_(std::move(kind)) {}
+    ) : watched_literals_(std::move(watched_literals)), next_watches_(std::move(next_watches)), kind_(std::move(kind)) {}
 
     void link_to_clause(size_t watch_index, const ClauseId &clause_id) {
         next_watches_[watch_index] = clause_id;
@@ -331,6 +331,7 @@ public:
         if (solvable_id == watched_literals_[0]) {
             return next_watches_[0];
         } else {
+            std::cout << "watched_literals_[1]: " << watched_literals_[1].to_string() << " solv: " << solvable_id.to_string() << std::endl;
             debug_assert(watched_literals_[1] == solvable_id);
             return next_watches_[1];
         }
@@ -537,8 +538,6 @@ namespace Clause {
                 requirement,
                 decision_tracker
         );
-
-        fprintf(stderr, "============================ constrains conflict: %d\n", conflict);
 
         return std::make_pair(from_kind_and_initial_watches(kind, watched_literals), conflict);
     }

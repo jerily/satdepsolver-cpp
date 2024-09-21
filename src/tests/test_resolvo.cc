@@ -780,24 +780,24 @@ int main(int argc, char *argv[]) {
     test_unsat_bluesky_conflict();
     test_unsat_pubgrub_article();
 
-//    test_unsat_applies_graph_compression();
-//    test_unsat_constrains();
-//    test_unsat_constrains_2();
-//    test_missing_dep();
-//    test_no_backtracking();
-//    test_incremental_crash();
-//    test_merge_installable();
-//
-//
-//    test_excluded();
-//    test_merge_excluded();
-//    test_root_excluded();
-//
-//    test_resolve_multiple();
-////    test_clause_size();
-//
-////    test_indenter_without_top_level_indent();
-////    test_indenter_with_multiple_siblings();
+    test_unsat_applies_graph_compression();
+    test_unsat_constrains();
+    test_unsat_constrains_2();
+    test_missing_dep();
+    test_no_backtracking();
+    test_incremental_crash();
+    test_merge_installable();
+
+
+    test_excluded();
+    test_merge_excluded();
+    test_root_excluded();
+
+    test_resolve_multiple();
+//    test_clause_size();
+
+//    test_indenter_without_top_level_indent();
+//    test_indenter_with_multiple_siblings();
     return 0;
 }
 

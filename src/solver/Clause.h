@@ -38,7 +38,7 @@ public:
     SolvableId solvable_id;
     bool negate;
 
-    explicit Literal(SolvableId id, bool neg) : solvable_id(id), negate(neg) {}
+    explicit Literal(const SolvableId& id, bool neg) : solvable_id(id), negate(neg) {}
 
     // Returns the value that would make the literal evaluate to true if assigned to the literal's solvable
     bool satisfying_value() const {
@@ -328,10 +328,10 @@ public:
     }
 
     ClauseId next_watched_clause(const SolvableId &solvable_id) const {
+
         if (solvable_id == watched_literals_[0]) {
             return next_watches_[0];
         } else {
-            std::cout << "watched_literals_[1]: " << watched_literals_[1].to_string() << " solv: " << solvable_id.to_string() << std::endl;
             debug_assert(watched_literals_[1] == solvable_id);
             return next_watches_[1];
         }
@@ -369,13 +369,11 @@ public:
         return std::visit([&](auto &&arg) -> std::array<Literal, 2> {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, Clause::InstallRoot>) {
-                debug_assert(false);
                 // unreachable
-                return std::array<Literal, 2>{Literal(SolvableId::null(), false), Literal(SolvableId::null(), false)};
+                throw std::runtime_error("unreachable");
             } else if constexpr (std::is_same_v<T, Clause::Excluded>) {
-                debug_assert(false);
                 // unreachable
-                return std::array<Literal, 2>{Literal(SolvableId::null(), false), Literal(SolvableId::null(), false)};
+                throw std::runtime_error("unreachable");
             } else if constexpr (std::is_same_v<T, Clause::Learnt>) {
                 auto clause_variant = std::any_cast<Clause::Learnt>(arg);
                 auto learnt_literals = learnt_clauses[clause_variant.learnt_clause_id];
@@ -423,11 +421,9 @@ public:
         return std::visit([&](auto &&arg) -> std::optional<SolvableId> {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, Clause::InstallRoot>) {
-                debug_assert(false);
-                return std::nullopt;
+                throw std::runtime_error("unreachable");
             } else if constexpr (std::is_same_v<T, Clause::Excluded>) {
-                debug_assert(false);
-                return std::nullopt;
+                throw std::runtime_error("unreachable");
             } else if constexpr (std::is_same_v<T, Clause::Learnt>) {
                 auto clause_variant = std::any_cast<Clause::Learnt>(arg);
                 auto &literals = learnt_clauses[clause_variant.learnt_clause_id];
@@ -454,7 +450,7 @@ public:
                     return std::nullopt;
                 }
 
-                auto &candidates = optional_candidates.value();
+                const auto &candidates = optional_candidates.value();
                 auto it = std::find_if(candidates.begin(), candidates.end(), [&](const SolvableId &candidate) {
                     return can_watch(Literal(candidate, false));
                 });

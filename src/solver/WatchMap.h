@@ -29,17 +29,28 @@ public:
         }
     }
 
-    void update_watched(std::optional<ClauseState> &predecessor_clause, ClauseState &clause, const ClauseId& clause_id, size_t watch_index,
-                        const SolvableId &previous_watch, const SolvableId &new_watch) {
+    void update_watched(
+            std::optional<std::reference_wrapper<ClauseState>> predecessor_clause,
+            ClauseState &clause,
+            const ClauseId& clause_id,
+            size_t watch_index,
+            const SolvableId &previous_watch,
+            const SolvableId &new_watch
+    ) {
+
+        std::cout << "predecessor_clause.has_value = " << predecessor_clause.has_value() << std::endl;
+
         // Remove this clause from its current place in the linked list, because we
         // are no longer watching what brought us here
         if (predecessor_clause.has_value()) {
             // Unlink the clause
-            predecessor_clause.value().unlink_clause(clause, previous_watch, watch_index);
+            predecessor_clause.value().get().unlink_clause(clause, previous_watch, watch_index);
         } else {
             // This was the first clause in the chain
             map.insert(previous_watch, clause.get_linked_clause(watch_index));
         }
+
+        std::cout << "updating watched_literals_[" << watch_index << "] from " << previous_watch.to_string() << " to " << new_watch.to_string() << std::endl;
 
         // Set the new watch
         clause.watched_literals_[watch_index] = new_watch;

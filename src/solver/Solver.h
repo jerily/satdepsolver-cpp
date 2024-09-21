@@ -1042,10 +1042,12 @@ public:
 
             // Propagate, iterating through the linked list of clauses that watch this solvable
             std::optional<ClauseId> old_predecessor_clause_id;
-            std::optional<ClauseId> predecessor_clause_id;
+            std::optional<ClauseId> predecessor_clause_id = std::nullopt;
             ClauseId clause_id = watches_.first_clause_watching_solvable(pkg);
             while (!clause_id.is_null()) {
-                assert(!predecessor_clause_id.has_value() || predecessor_clause_id.value() != clause_id);
+
+                // if assertion fails, link list is circular
+                assert(predecessor_clause_id != clause_id);
 
                 // Get mutable access to both clauses.
 
@@ -1059,9 +1061,10 @@ public:
                 //                        (None, &mut clauses[clause_id])
                 //                    };
 
-                std::optional<ClauseState> predecessor_clause = predecessor_clause_id.has_value()
-                        ? std::optional(clauses_[predecessor_clause_id.value()])
-                        : std::nullopt;
+                std::optional<std::reference_wrapper<ClauseState>> predecessor_clause = std::nullopt;
+                if (predecessor_clause_id.has_value()) {
+                    predecessor_clause = std::ref(clauses_[predecessor_clause_id.value()]);
+                }
                 ClauseState &clause = clauses_[clause_id];
 
                 // Update the prev_clause_id for the next run
@@ -1070,6 +1073,7 @@ public:
 
                 // Configure the next clause to visit
                 ClauseId this_clause_id = clause_id;
+
                 clause_id = clause.next_watched_clause(pkg);
 
                 auto optional_payload = clause.watch_turned_false(pkg, decision_tracker_.get_map(),
@@ -1077,7 +1081,6 @@ public:
                 if (optional_payload.has_value()) {
                     auto [watched_literals, watch_index] = optional_payload.value();
 
-                    // One of the watched literals is now false
                     auto optional_variable = clause.next_unwatched_variable(
                             learnt_clauses_,
                             cache.version_set_to_sorted_candidates,
@@ -1085,9 +1088,18 @@ public:
                     );
 
                     if (optional_variable.has_value()) {
+                        // One of the watched literals is now false
                         auto variable = optional_variable.value();
 
                         assert(clause.watched_literals_[0] != variable && clause.watched_literals_[1] != variable);
+
+                        auto display_pre_clause = DisplayClause(pool, predecessor_clause.value());
+                        auto display_clause = DisplayClause(pool, clause);
+                        auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(variable));
+
+                        std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~ predecessor_clause: " << display_pre_clause.to_string() << std::endl;
+                        std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clause: " << display_clause.to_string() << std::endl;
+                        std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~ variable: " << display_solvable.to_string() << std::endl;
 
                         watches_.update_watched(predecessor_clause, clause, this_clause_id, watch_index, pkg,
                                                 variable);
@@ -1102,15 +1114,9 @@ public:
                         int remaining_watch_index = (watch_index == 0) ? 1 : 0;
 
                         Literal remaining_watch = watched_literals[remaining_watch_index];
-                        bool satisfying_value = remaining_watch.satisfying_value();
-
-//                        auto display_remaining_watch = DisplaySolvable(pool,
-//                                                                       pool->resolve_internal_solvable(
-//                                                                               remaining_watch.solvable_id));
-//                        std::cout << "remaining_watch: " << display_remaining_watch.to_string() << std::endl;
 
                         auto decided = decision_tracker_.try_add_decision(
-                                Decision(remaining_watch.solvable_id, satisfying_value, this_clause_id), level
+                                Decision(remaining_watch.solvable_id, remaining_watch.satisfying_value(), this_clause_id), level
                         );
 
                         if (!decided.has_value()) {

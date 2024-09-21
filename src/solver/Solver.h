@@ -1061,7 +1061,7 @@ public:
                 //                        (None, &mut clauses[clause_id])
                 //                    };
 
-                std::optional<std::reference_wrapper<ClauseState>> predecessor_clause = std::nullopt;
+                std::optional<std::reference_wrapper<ClauseState>> predecessor_clause;
                 if (predecessor_clause_id.has_value()) {
                     predecessor_clause = std::ref(clauses_[predecessor_clause_id.value()]);
                 }
@@ -1092,14 +1092,6 @@ public:
                         auto variable = optional_variable.value();
 
                         assert(clause.watched_literals_[0] != variable && clause.watched_literals_[1] != variable);
-
-                        auto display_pre_clause = DisplayClause(pool, predecessor_clause.value());
-                        auto display_clause = DisplayClause(pool, clause);
-                        auto display_solvable = DisplaySolvable(pool, pool->resolve_internal_solvable(variable));
-
-                        std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~ predecessor_clause: " << display_pre_clause.to_string() << std::endl;
-                        std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clause: " << display_clause.to_string() << std::endl;
-                        std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~ variable: " << display_solvable.to_string() << std::endl;
 
                         watches_.update_watched(predecessor_clause, clause, this_clause_id, watch_index, pkg,
                                                 variable);

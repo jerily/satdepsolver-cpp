@@ -36,33 +36,6 @@ public:
         merged_candidates = graph.simplify(pool);
         installable_set = graph.get_installable_set();
         missing_set = graph.get_missing_set();
-
-        /*
-        for (auto installable : installable_set) {
-            auto node = graph.graph.get_node(installable);
-            auto payload = node.get_payload();
-            if (std::holds_alternative<ProblemNode::Solvable>(payload)) {
-                auto solvable_id = std::get<ProblemNode::Solvable>(payload).solvable;
-                auto internal_solvable = pool->resolve_internal_solvable(solvable_id);
-                auto display_solvable = DisplaySolvable<VS, N>(pool, internal_solvable);
-                std::cout << "here: " << display_solvable.to_string() << std::endl;
-            }
-        }
-
-
-        DfsPostOrder<ProblemNodeVariant, ProblemEdgeVariant> dfs(graph.graph, graph.root_node);
-        while (auto optional_node_index = dfs.next()) {
-            auto node_index = optional_node_index.value();
-            auto node = graph.graph.get_node(node_index);
-            auto payload = node.get_payload();
-            if (std::holds_alternative<ProblemNode::Solvable>(payload)) {
-                auto solvable_id = std::get<ProblemNode::Solvable>(payload).solvable;
-                auto internal_solvable = pool->resolve_internal_solvable(solvable_id);
-                auto display_solvable = DisplaySolvable<VS, N>(pool, internal_solvable);
-                std::cout << "dfs-here: " << node_index << ": " << display_solvable.to_string() << std::endl;
-            }
-        }
-        */
     }
 
     friend std::ostream &operator<<(std::ostream &os, const DisplayUnsat &display_unsat) {

@@ -1364,11 +1364,6 @@ public:
                     auto package_node_index = problem.add_node(graph, nodes, clause_variant.parent);
                     auto package_node = graph.get_node(package_node_index);
 
-//                    auto display_solvable_parent = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(clause_variant.parent));
-//                    auto display_solvable_requirement = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(clause_variant.requirement));
-//                    auto package_name_id = pool->resolve_version_set_package_name(clause_variant.requirement);
-//                    auto package_name = pool->resolve_package_name(package_name_id);
-
                     auto sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
                     if (!sorted_candidates.empty()) {
                         for (const SolvableId &candidate_id: sorted_candidates) {
@@ -1424,9 +1419,6 @@ public:
 
         }
 
-//        std::cout << "unresolved_node_index: " << unresolved_node_index << std::endl;
-//        std::cout << "graph.incoming_edges(unresolved_node_index).empty(): " << graph.incoming_edges(unresolved_node_index).empty() << std::endl;
-
         std::optional<NodeIndex> final_unresolved_node;
         if (graph.incoming_edges(unresolved_node_index).empty()) {
             graph.remove_node(unresolved_node_index);
@@ -1441,7 +1433,6 @@ public:
         while (const auto& optional_node_index = bfs.next()) {
             visited_nodes.insert(optional_node_index.value());
         }
-
 
         assert(graph.node_count() == visited_nodes.size());
         return ProblemGraph(graph, root_node_index, final_unresolved_node);

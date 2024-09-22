@@ -241,23 +241,30 @@ private:
     DiGraph<N, E> graph;
     NodeIndex root_node;
     std::deque<NodeIndex> queue;
+
+    // keep track of visited nodes
+    std::unordered_set<NodeIndex> visited;
 public:
     Bfs(DiGraph<N, E> graph, NodeIndex root_node) : graph(graph), root_node(root_node) {
         queue.push_back(root_node);
     }
 
     std::optional<NodeIndex> next() {
-        if (queue.empty()) {
-            return std::nullopt;
-        }
-        auto node_index = queue.front();
-        queue.pop_front();
-        for (auto &edge: graph.edges) {
-            if (edge.get_node_from().get_id() == node_index) {
-                queue.push_back(edge.get_node_to().get_id());
+        while (!queue.empty()) {
+            auto node_index = queue.front();
+            queue.pop_front();
+            if (visited.find(node_index) != visited.end()) {
+                continue;
             }
+            for (auto &edge: graph.edges) {
+                if (edge.get_node_from().get_id() == node_index) {
+                    queue.push_back(edge.get_node_to().get_id());
+                }
+            }
+            visited.insert(node_index);
+            return node_index;
         }
-        return node_index;
+        return std::nullopt;
     }
 };
 

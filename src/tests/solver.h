@@ -430,7 +430,6 @@ std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &s
                 auto optional_problem_graph = solver.graph(unsolvable.problem);
                 std::stringstream output;
                 const auto& graph = optional_problem_graph.value();
-
                 std::cout << graph.graphviz(pool, true) << std::endl;
 
                 DisplayUnsat<Range<Pack>, std::string> display_unsat(pool, graph);

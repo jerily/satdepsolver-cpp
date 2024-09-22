@@ -782,7 +782,7 @@ int main(int argc, char *argv[]) {
 
     test_unsat_applies_graph_compression();
     test_unsat_constrains();
-    //test_unsat_constrains_2();
+    test_unsat_constrains_2();
     test_missing_dep();
     test_no_backtracking();
     test_incremental_crash();

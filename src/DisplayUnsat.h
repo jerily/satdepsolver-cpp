@@ -491,7 +491,7 @@ public:
                             }
 
                             auto temp_indent = temp_indenter.get_indent();
-                            oss << temp_indent << name << " " << version_set << ", which conflicts with any installable versions previously reported" << std::endl;
+                            oss << temp_indent << version_set_package_name << " " << version_set << " , which conflicts with any installable versions previously reported" << std::endl;
                         }
                     } else {
                         oss << indent << name << " " << version << " would require" << std::endl;

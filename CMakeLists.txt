@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(test_resolvo VERSION 0.5.0 LANGUAGES C CXX)
+project(satdepsolver-cpp VERSION 0.5.0 LANGUAGES C CXX)
 
 set(TARGET ${PROJECT_NAME})
 set(CMAKE_C_STANDARD   11)

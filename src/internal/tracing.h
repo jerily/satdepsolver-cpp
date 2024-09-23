@@ -6,6 +6,7 @@
 
 namespace tracing {
 
+#ifdef DEBUG
     void trace(const char *fmt, ...) {
         va_list args;
         va_start(args, fmt);
@@ -26,7 +27,13 @@ namespace tracing {
         vfprintf(stderr, fmt, args);
         va_end(args);
     }
+#else
+    void trace(const char *fmt, ...) {}
 
+    void info(const char *fmt, ...) {}
+
+    void debug(const char *fmt, ...) {}
+#endif
 
 }
 

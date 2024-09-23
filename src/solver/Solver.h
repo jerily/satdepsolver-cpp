@@ -586,7 +586,7 @@ public:
             // We have a partial solution. E.g. there is a solution that satisfies all the clauses
             // that have been added so far.
 
-            fprintf(stderr, "run_sat: level=%d partial solution\n", level);
+            tracing::info("run_sat: level=%d partial solution\n", level);
 
             // Determine which solvables are part of the solution for which we did not yet get any
             // dependencies. If we find any such solvable it means we did not arrive at the full
@@ -604,7 +604,7 @@ public:
 
             if (new_solvables.empty()) {
                 // If no new literals were selected this solution is complete and we can return.
-                fprintf(stderr, "run_sat: level=%d complete solution\n", level);
+                tracing::info("run_sat: level=%d complete solution\n", level);
                 return std::nullopt;
             }
 
@@ -842,7 +842,7 @@ public:
         auto optional_decision = decision_tracker_.try_add_decision(Decision(solvable, true, clause_id), level);
         if (!optional_decision.has_value()) {
             // bug: solvable was already decided!
-            fprintf(stderr, "bug: solvable was already decided!\n");
+            tracing::info("bug: solvable was already decided!\n");
             return std::make_pair(level, std::nullopt);
 //            throw std::runtime_error("bug: solvable was already decided!");
         }

@@ -11,6 +11,13 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_CXX_FLAGS  "-g -DTCL_THREADS -DPROJECT_VERSION=${PROJECT_VERSION} ${CMAKE_CXX_FLAGS}")
 
+if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+    set(CMAKE_C_FLAGS "-g -DDEBUG ${CMAKE_C_FLAGS}")
+else()
+    # NDEBUG to not generate code for assert
+    add_compile_definitions(NDEBUG)
+endif ()
+
 add_executable(test_resolvo
         tests/test_resolvo.cc
         tests/solver.h

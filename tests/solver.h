@@ -1,14 +1,14 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
-#include "../internal/NameId.h"
-#include "../internal/VersionSetId.h"
-#include "../Common.h"
-#include "../Range.h"
-#include "../Pool.h"
-#include "../DisplaySolvable.h"
-#include "../solver/Solver.h"
-#include "../DisplayUnsat.h"
+#include "../src/internal/NameId.h"
+#include "../src/internal/VersionSetId.h"
+#include "../src/Common.h"
+#include "../src/Range.h"
+#include "../src/Pool.h"
+#include "../src/DisplaySolvable.h"
+#include "../src/solver/Solver.h"
+#include "../src/DisplayUnsat.h"
 #include <cstdint>
 #include <unordered_set>
 #include <sstream>

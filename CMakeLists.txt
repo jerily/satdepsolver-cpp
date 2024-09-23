@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(test_resolvo VERSION 1.0.0 LANGUAGES C CXX)
+project(test_resolvo VERSION 0.5.0 LANGUAGES C CXX)
 
 set(TARGET ${PROJECT_NAME})
 set(CMAKE_C_STANDARD   11)
@@ -12,7 +12,8 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_CXX_FLAGS  "-g -DTCL_THREADS -DPROJECT_VERSION=${PROJECT_VERSION} ${CMAKE_CXX_FLAGS}")
 
 add_executable(test_resolvo
-        src/tests/test_resolvo.cc
+        tests/test_resolvo.cc
+        tests/solver.h
         src/internal/Arena.h
         src/internal/ArenaId.h
         src/internal/NameId.h
@@ -37,11 +38,21 @@ add_executable(test_resolvo
         src/solver/SolverCache.h
         src/Common.h
         src/Range.h
-        src/tests/solver.h
         src/DisplayClause.h
         src/DisplayName.h
         src/DisplayDecisionMap.h
         src/internal/Mapping.h
         src/DisplayUnsat.h
         src/DisplayMergedSolvable.h
+)
+
+set(CMAKE_CTEST_ARGUMENTS "--verbose")
+set(CMAKE_CTEST_ARGUMENTS "--output-on-failure")
+enable_testing()
+add_test(NAME AllUnitTests COMMAND ./test_resolvo)
+
+install(
+        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/include/satdepsolver-cpp
+        FILES_MATCHING PATTERN "*.h"
 )

@@ -789,7 +789,7 @@ int main(int argc, char *argv[]) {
     test_merge_installable();
 
 
-//    test_excluded();
+    test_excluded();
     test_merge_excluded();
     test_root_excluded();
 

@@ -4,13 +4,14 @@
 #include <sstream>
 #include <utility>
 #include "Pool.h"
+#include "DisplayName.h"
 #include "DisplaySolvable.h"
 #include "DisplayMergedSolvable.h"
 #include "Problem.h"
 
 namespace DisplayOp {
     struct Requirement {
-        VersionSetId version_set_id;
+        ::Requirement requirement;
         std::vector<EdgeIndex> edges;
     };
     struct Candidate {
@@ -94,14 +95,18 @@ public:
                 }
 
                 auto peek_next = std::next(it);
-                auto child_order = std::holds_alternative<ProblemEdge::Conflict>(peek_next->get_weight()) ? ChildOrder::HasRemainingSiblings : ChildOrder::Last;
+                auto has_more_conflicts = std::any_of(peek_next, edges.end(), [](const auto &next) {
+                    return std::holds_alternative<ProblemEdge::Conflict>(next.get_weight());
+                });
+                auto child_order = has_more_conflicts ? ChildOrder::HasRemainingSiblings : ChildOrder::Last;
                 indenter = indenter.push_level_with_order(child_order);
                 auto indent = indenter.get_indent();
 
                 auto conflict = std::get<ProblemEdge::Conflict>(edge.get_weight()).conflict_cause;
 
                 if (std::holds_alternative<ConflictCause::Constrains>(conflict) || std::holds_alternative<ConflictCause::ForbidMultipleInstances>(conflict)) {
-                    throw std::runtime_error("Unreachable");
+                    // Root constraints are already described by fmt_graph.
+                    continue;
                 } else if (std::holds_alternative<ConflictCause::Locked>(conflict)) {
                     auto locked_solvable = std::get<ConflictCause::Locked>(conflict).solvable;
                     auto locked = pool->resolve_solvable(locked_solvable);
@@ -137,13 +142,13 @@ public:
         //                (version_set_id, edges)
         //            })
 
-        std::unordered_map<VersionSetId, std::vector<EdgeIndex>> chunked;
+        std::unordered_map<::Requirement, std::vector<EdgeIndex>> chunked;
         for (const auto& edge : requires_edges) {
             auto requires = std::get<ProblemEdge::Requires>(edge.get_weight());
-            if (chunked.find(requires.version_set_id) == chunked.end()) {
-                chunked[requires.version_set_id] = std::vector<EdgeIndex>();
+            if (chunked.find(requires.requirement) == chunked.end()) {
+                chunked[requires.requirement] = std::vector<EdgeIndex>();
             }
-            chunked.at(requires.version_set_id).push_back(edge.get_id());
+            chunked.at(requires.requirement).push_back(edge.get_id());
         }
 
         //.sorted_by_key(|(_version_set_id, edges)| {
@@ -152,7 +157,7 @@ public:
         //                    .any(|&edge| installable_nodes.contains(&graph.edge_endpoints(edge).unwrap().1))
         //            })
 
-        std::vector<std::pair<VersionSetId, std::vector<EdgeIndex>>> chunked_vector(chunked.begin(), chunked.end());
+        std::vector<std::pair<::Requirement, std::vector<EdgeIndex>>> chunked_vector(chunked.begin(), chunked.end());
         std::sort(chunked_vector.begin(), chunked_vector.end(), [this](auto &a, auto &b) -> bool {
             const auto &a_edges = a.second;
             const auto &b_edges = b.second;
@@ -174,7 +179,7 @@ public:
 
         std::vector<std::pair<DisplayOpVariant, Indenter>> stack;
         std::transform(chunked_vector.begin(), chunked_vector.end(), std::back_inserter(stack), [&indenter](auto &pair) {
-            // pair.first is version_set_id
+            // pair.first is requirement
             // pair.second is vector of edges
             return std::make_pair(DisplayOp::Requirement{pair.first, pair.second}, indenter.push_level());
         });
@@ -194,7 +199,7 @@ public:
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, DisplayOp::Requirement>) {
                     auto requirement = std::any_cast<DisplayOp::Requirement>(arg);
-                    auto version_set_id = requirement.version_set_id;
+                    auto dep_requirement = requirement.requirement;
                     auto edges = requirement.edges;
                     assert(!edges.empty());
 
@@ -209,9 +214,7 @@ public:
                         return installable_set.find(target.get_id()) != installable_set.end();
                     });
 
-                    auto req = pool->resolve_version_set(version_set_id);
-                    auto name_id = pool->resolve_version_set_package_name(version_set_id);
-                    auto name = pool->resolve_package_name(name_id);
+                    auto req = display_requirement(pool, dep_requirement);
 
                     auto target = graph.graph.edges.at(edges[0]).get_node_to();
                     auto missing = edges.size() == 1 && std::holds_alternative<ProblemNode::UnresolvedDependency>(target.get_payload());
@@ -219,16 +222,16 @@ public:
                     if (missing) {
                         // No candidates for requirement
                         if (top_level) {
-                            oss << indent << "No candidates were found for " << name << " " << req << "." << std::endl;
+                            oss << indent << "No candidates were found for " << req << "." << std::endl;
                         } else {
-                            oss << indent << name << " " << req << ", for which no candidates were found." << std::endl;
+                            oss << indent << req << ", for which no candidates were found." << std::endl;
                         }
                     } else if (installable) {
                         // Package can be installed (only mentioned for top-level requirements)
                         if (top_level) {
-                            oss << indent << name << " " << req << " can be installed with any of the following options:" << std::endl;
+                            oss << indent << req << " can be installed with any of the following options:" << std::endl;
                         } else {
-                            oss << indent << name << " " << req << ", which can be installed with any of the following options:" << std::endl;
+                            oss << indent << req << ", which can be installed with any of the following options:" << std::endl;
                         }
 
                         std::vector<EdgeIndex> filtered_edges;
@@ -275,9 +278,9 @@ public:
                     } else {
                         // Package cannot be installed (the conflicting requirement is further down the tree)
                         if (top_level) {
-                            oss << indent << name << " " << req << " cannot be installed because there are no viable options:" << std::endl;
+                            oss << indent << req << " cannot be installed because there are no viable options:" << std::endl;
                         } else {
-                            oss << indent << name << " " << req
+                            oss << indent << req
                                 << ", which cannot be installed because there are no viable options:" << std::endl;
                         }
 
@@ -484,13 +487,13 @@ public:
                             return std::holds_alternative<ProblemEdge::Requires>(edge.get_weight());
                         });
 
-                        std::unordered_map<VersionSetId, std::vector<EdgeIndex>> chunked;
+                        std::unordered_map<::Requirement, std::vector<EdgeIndex>> chunked;
                         for (auto &edge : requires_edges) {
                             auto requires = std::get<ProblemEdge::Requires>(edge.get_weight());
-                            if (chunked.find(requires.version_set_id) == chunked.end()) {
-                                chunked[requires.version_set_id] = std::vector<EdgeIndex>();
+                            if (chunked.find(requires.requirement) == chunked.end()) {
+                                chunked[requires.requirement] = std::vector<EdgeIndex>();
                             }
-                            chunked.at(requires.version_set_id).push_back(edge.get_id());
+                            chunked.at(requires.requirement).push_back(edge.get_id());
                         }
 
                         //                            .sorted_by_key(|(_version_set_id, edges)| {
@@ -500,7 +503,7 @@ public:
                         //                                })
                         //                            })
 
-                        std::vector<std::pair<VersionSetId, std::vector<EdgeIndex>>> chunked_vector(chunked.begin(), chunked.end());
+                        std::vector<std::pair<::Requirement, std::vector<EdgeIndex>>> chunked_vector(chunked.begin(), chunked.end());
                         std::sort(chunked_vector.begin(), chunked_vector.end(), [this](auto &a, auto &b) -> bool {
                             const auto &a_edges = a.second;
                             const auto &b_edges = b.second;
@@ -524,7 +527,7 @@ public:
 
                         std::vector<std::pair<DisplayOpVariant, Indenter>> requirements;
                         std::transform(chunked_vector.begin(), chunked_vector.end(), std::back_inserter(requirements), [&node_indenter_pair](auto &pair) {
-//                             pair.first is version_set_id
+//                             pair.first is requirement
 //                             pair.second is vector of edges
                             return std::make_pair(DisplayOp::Requirement{pair.first, pair.second}, node_indenter_pair.second.push_level());
                         });

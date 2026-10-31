@@ -2,6 +2,9 @@
 #define ARENA_H
 
 #include <vector>
+#include <algorithm>
+#include <optional>
+#include <utility>
 #include <cstddef>
 #include <cassert>
 
@@ -102,9 +105,9 @@ public:
     std::optional<std::pair<TId, const TValue&>> next() {
         if (index < arena.size()) {
             auto id = TId::from_usize(index);
-            auto value = arena[id];
+            const auto &value = arena[id];
             index++;
-            return std::make_pair(id, value);
+            return std::pair<TId, const TValue &>(id, value);
         } else {
             return std::nullopt;
         }

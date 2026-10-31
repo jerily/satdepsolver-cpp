@@ -2,11 +2,15 @@
 #define COMMON_H
 
 #include <cstddef>
+#include <cstdint>
+#include <sstream>
+#include <stdexcept>
 #include <vector>
 #include <variant>
 #include <optional>
 #include "internal/SolvableId.h"
 #include "internal/StringId.h"
+#include "internal/VersionSetUnionId.h"
 #include "Pool.h"
 
 // A list of candidate solvables for a specific package. This is returned from
@@ -45,11 +49,113 @@ struct PackageCandidates {
     std::vector<std::pair<SolvableId, StringId>> excluded;
 };
 
+class Requirement {
+public:
+    enum class Kind : std::uint8_t {
+        Single,
+        Union,
+    };
+
+private:
+    Kind kind_;
+    std::uint32_t value_;
+
+public:
+    Requirement(const VersionSetId &version_set_id)
+            : kind_(Kind::Single), value_(static_cast<std::uint32_t>(version_set_id.to_usize())) {}
+    Requirement(const VersionSetUnionId &version_set_union_id)
+            : kind_(Kind::Union), value_(static_cast<std::uint32_t>(version_set_union_id.to_usize())) {}
+    Requirement(const Requirement &) = default;
+    Requirement &operator=(const Requirement &) = default;
+
+    Kind kind() const {
+        return kind_;
+    }
+
+    bool is_single() const {
+        return kind_ == Kind::Single;
+    }
+
+    bool is_union() const {
+        return kind_ == Kind::Union;
+    }
+
+    VersionSetId version_set() const {
+        if (!is_single()) {
+            throw std::runtime_error("Requirement does not contain a single version set");
+        }
+        return VersionSetId(value_);
+    }
+
+    VersionSetUnionId version_set_union() const {
+        if (!is_union()) {
+            throw std::runtime_error("Requirement does not contain a version set union");
+        }
+        return VersionSetUnionId(value_);
+    }
+
+    template<typename VS, typename N>
+    std::vector<VersionSetId> version_sets(const std::shared_ptr<Pool<VS, N>> &pool) const {
+        if (is_single()) {
+            return {version_set()};
+        }
+
+        return pool->resolve_version_set_union(version_set_union());
+    }
+
+    bool operator==(const Requirement &other) const {
+        return kind_ == other.kind_ && value_ == other.value_;
+    }
+
+    bool operator!=(const Requirement &other) const {
+        return !(*this == other);
+    }
+
+    bool operator<(const Requirement &other) const {
+        if (kind_ != other.kind_) {
+            return kind_ < other.kind_;
+        }
+        return value_ < other.value_;
+    }
+};
+
+inline Requirement requirement_single(const VersionSetId &version_set_id) {
+    return Requirement(version_set_id);
+}
+
+inline Requirement requirement_union(const VersionSetUnionId &version_set_union_id) {
+    return Requirement(version_set_union_id);
+}
+
+template<typename VS, typename N>
+std::string display_requirement(const std::shared_ptr<Pool<VS, N>> &pool, const Requirement &requirement) {
+    std::ostringstream oss;
+    bool first = true;
+    for (const auto &version_set_id: requirement.version_sets(pool)) {
+        if (!first) {
+            oss << " | ";
+        }
+        first = false;
+
+        auto package_name = pool->resolve_package_name(pool->resolve_version_set_package_name(version_set_id));
+        oss << package_name;
+
+        std::ostringstream version_set_stream;
+        version_set_stream << pool->resolve_version_set(version_set_id);
+        auto version_set_text = version_set_stream.str();
+        if (!version_set_text.empty()) {
+            oss << " " << version_set_text;
+        }
+    }
+
+    return oss.str();
+}
+
 // Holds information about the dependencies of a package when they are known.
 struct KnownDependencies {
     // Defines which packages should be installed alongside the depending package and the
     // constraints applied to the package.
-    std::vector<VersionSetId> requirements;
+    std::vector<Requirement> requirements;
 
     // Defines additional constraints on packages that may or may not be part of the solution.
     // Different from `requirements`, packages in this set are not necessarily included in the
@@ -87,12 +193,25 @@ namespace std {
             return hash1 ^ (hash2 << 1);
         }
     };
+
+    template <>
+    struct hash<Requirement> {
+        std::size_t operator()(const Requirement &requirement) const {
+            auto kind_hash = std::hash<std::uint8_t>{}(static_cast<std::uint8_t>(requirement.kind()));
+            auto value_hash = requirement.is_single()
+                              ? std::hash<VersionSetId>{}(requirement.version_set())
+                              : std::hash<VersionSetUnionId>{}(requirement.version_set_union());
+            return kind_hash ^ (value_hash << 1);
+        }
+    };
 }
 
 
 template<typename VS, typename N = std::string>
 class DependencyProvider {
 public:
+    virtual ~DependencyProvider() = default;
+
     // Returns the `Pool` that is used to allocate the Ids returned from this instance
     std::shared_ptr<Pool<VS, N>> pool;
 //    virtual const Pool<VS, N>& get_pool() = 0;
@@ -117,6 +236,57 @@ public:
     // [UnsolvableOrCancelled::Cancelled].
     virtual std::optional<std::string> should_cancel_with_value() = 0;
 
+    // Returns the version sets that make up the specified version set union.
+    virtual std::vector<VersionSetId> version_sets_in_union(VersionSetUnionId version_set_union_id) {
+        return pool->resolve_version_set_union(version_set_union_id);
+    }
+
+};
+
+class Problem {
+private:
+    std::vector<Requirement> requirements_;
+    std::vector<VersionSetId> constraints_;
+    std::vector<SolvableId> soft_requirements_;
+
+public:
+    Problem() = default;
+
+    Problem &requirements(std::vector<Requirement> requirements) {
+        requirements_ = std::move(requirements);
+        return *this;
+    }
+
+    Problem &requirements(const std::vector<VersionSetId> &requirements) {
+        requirements_.clear();
+        requirements_.reserve(requirements.size());
+        for (const auto &requirement: requirements) {
+            requirements_.push_back(requirement_single(requirement));
+        }
+        return *this;
+    }
+
+    const std::vector<Requirement> &requirements() const {
+        return requirements_;
+    }
+
+    Problem &constraints(std::vector<VersionSetId> constraints) {
+        constraints_ = std::move(constraints);
+        return *this;
+    }
+
+    const std::vector<VersionSetId> &constraints() const {
+        return constraints_;
+    }
+
+    Problem &soft_requirements(std::vector<SolvableId> soft_requirements) {
+        soft_requirements_ = std::move(soft_requirements);
+        return *this;
+    }
+
+    const std::vector<SolvableId> &soft_requirements() const {
+        return soft_requirements_;
+    }
 };
 
 #endif // COMMON_H

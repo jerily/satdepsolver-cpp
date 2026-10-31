@@ -1,6 +1,7 @@
 #ifndef STRING_ID_H
 #define STRING_ID_H
 
+#include <functional>
 #include <cstddef>
 #include <cstdint>
 #include <cassert>

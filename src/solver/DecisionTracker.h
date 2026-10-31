@@ -70,6 +70,11 @@ public:
     }
 
     void undo_until(uint32_t level) {
+        if (level == 0) {
+            clear();
+            return;
+        }
+
         while (!stack.empty() && get_level(stack.back().solvable_id) > level) {
             undo_last();
         }

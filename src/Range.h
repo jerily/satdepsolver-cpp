@@ -23,6 +23,7 @@
 //
 // Ranges can be created from any type that implements [`Ord`] + [`Clone`].
 
+#include <ostream>
 #include <any>
 #include <utility>
 #include <variant>

@@ -45,12 +45,8 @@ public:
             } else if constexpr (std::is_same_v<T, Clause::Requires>) {
                 auto requires = std::any_cast<Clause::Requires>(arg);
                 auto solvable_id = requires.parent;
-                auto match_spec_id = requires.requirement;
-                auto match_spec = pool->resolve_version_set(match_spec_id);
                 auto display_parent = DisplaySolvable<VS, N>(pool, pool->resolve_internal_solvable(solvable_id));
-                auto display_package_name = DisplayName<VS, N>(pool, pool->resolve_version_set_package_name(match_spec_id));
-                oss << display_parent.to_string() << " requires " << display_package_name << " ";
-                oss << match_spec;
+                oss << display_parent.to_string() << " requires " << display_requirement(pool, requires.requirement);
             } else if constexpr (std::is_same_v<T, Clause::Constrains>) {
                 auto constrains = std::any_cast<Clause::Constrains>(arg);
                 auto s1 = constrains.parent;

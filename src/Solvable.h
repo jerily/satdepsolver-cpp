@@ -1,6 +1,8 @@
 #ifndef SOLVABLE_H
 #define SOLVABLE_H
 
+#include <variant>
+#include <optional>
 #include <memory>
 #include <string>
 #include <iostream>

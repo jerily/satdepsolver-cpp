@@ -24,8 +24,8 @@ public:
 
 //    std::pair<VS, N> _data;
 
-    // A mapping of `VersionSetId` to a sorted list of candidates that match that set.
-    FrozenMap<VersionSetId, std::vector<SolvableId>> version_set_to_sorted_candidates;
+    // A mapping of `Requirement` to a sorted list of candidates that satisfy it.
+    FrozenMap<Requirement, std::vector<SolvableId>> requirement_to_sorted_candidates;
 
     explicit SolverCache(D provider) : provider(provider) {}
 
@@ -111,28 +111,24 @@ public:
     //
     // If the provider has requested the solving process to be cancelled, the cancellation value
     // will be returned as an `Err(...)`.
-    std::vector<SolvableId> get_or_cache_sorted_candidates(VersionSetId version_set_id) {
-        auto optional_candidates = version_set_to_sorted_candidates.get(version_set_id);
+    std::vector<SolvableId> get_or_cache_sorted_candidates(const Requirement &requirement) {
+        if (requirement.is_single()) {
+            return get_or_cache_sorted_candidates_for_version_set(requirement.version_set());
+        }
+
+        auto optional_candidates = requirement_to_sorted_candidates.get(requirement);
         if (optional_candidates.has_value()) {
             return optional_candidates.value();
-        } else {
-            auto package_name = get_pool()->resolve_version_set_package_name(version_set_id);
-            auto matching_candidates = get_or_cache_matching_candidates(version_set_id);
-            auto package_candidates = get_or_cache_candidates(package_name);
-            std::vector<SolvableId> sorted_candidates;
-            sorted_candidates.insert(sorted_candidates.end(), matching_candidates.begin(), matching_candidates.end());
-            provider.sort_candidates(sorted_candidates);
-            auto favored_id = package_candidates.favored;
-            if (favored_id.has_value()) {
-                auto pos = std::find(sorted_candidates.begin(), sorted_candidates.end(), favored_id.value());
-                if (pos != sorted_candidates.end()) {
-                    std::rotate(sorted_candidates.begin(), pos, pos + 1);
-                }
-            }
-
-            version_set_to_sorted_candidates.insert(version_set_id, sorted_candidates);
-            return sorted_candidates;
         }
+
+        std::vector<SolvableId> sorted_candidates;
+        for (const auto &version_set_id: provider.version_sets_in_union(requirement.version_set_union())) {
+            auto candidates = get_or_cache_sorted_candidates_for_version_set(version_set_id);
+            sorted_candidates.insert(sorted_candidates.end(), candidates.begin(), candidates.end());
+        }
+
+        requirement_to_sorted_candidates.insert(requirement, sorted_candidates);
+        return sorted_candidates;
     }
 
     // Returns the dependencies of a solvable. Requests the solvables from the
@@ -178,6 +174,31 @@ public:
     }
 
 private:
+    std::vector<SolvableId> get_or_cache_sorted_candidates_for_version_set(VersionSetId version_set_id) {
+        auto requirement = requirement_single(version_set_id);
+        auto optional_candidates = requirement_to_sorted_candidates.get(requirement);
+        if (optional_candidates.has_value()) {
+            return optional_candidates.value();
+        }
+
+        auto package_name = get_pool()->resolve_version_set_package_name(version_set_id);
+        auto matching_candidates = get_or_cache_matching_candidates(version_set_id);
+        auto package_candidates = get_or_cache_candidates(package_name);
+        std::vector<SolvableId> sorted_candidates;
+        sorted_candidates.insert(sorted_candidates.end(), matching_candidates.begin(), matching_candidates.end());
+        provider.sort_candidates(sorted_candidates);
+        auto favored_id = package_candidates.favored;
+        if (favored_id.has_value()) {
+            auto pos = std::find(sorted_candidates.begin(), sorted_candidates.end(), favored_id.value());
+            if (pos != sorted_candidates.end()) {
+                std::rotate(sorted_candidates.begin(), pos, pos + 1);
+            }
+        }
+
+        requirement_to_sorted_candidates.insert(requirement, sorted_candidates);
+        return sorted_candidates;
+    }
+
     // A mapping from package name to a list of candidates.
     Arena<CandidatesId, PackageCandidates> candidates;
     FrozenCopyMap<NameId, CandidatesId> package_name_to_candidates;

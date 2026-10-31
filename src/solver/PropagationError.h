@@ -1,6 +1,7 @@
 #ifndef PROPAGATIONERROR_H
 #define PROPAGATIONERROR_H
 
+#include <variant>
 #include "../internal/SolvableId.h"
 #include "../internal/ClauseId.h"
 #include <any>

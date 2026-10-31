@@ -10,6 +10,7 @@
 #include "../src/solver/Solver.h"
 #include "../src/DisplayUnsat.h"
 #include <cstdint>
+#include <cstring>
 #include <unordered_set>
 #include <sstream>
 
@@ -109,15 +110,26 @@ namespace std {
 
 std::vector<std::string> split_string(const std::string &str, const char *split_str) {
     std::vector<std::string> split;
+    auto split_len = std::strlen(split_str);
     size_t start = 0;
     size_t end = str.find(split_str);
     while (end != std::string::npos) {
         split.push_back(str.substr(start, end - start));
-        start = end + 1;
+        start = end + split_len;
         end = str.find(split_str, start);
     }
     split.push_back(str.substr(start, end));
     return split;
+}
+
+std::string trim_string(const std::string &str) {
+    const auto first = str.find_first_not_of(" \t");
+    if (first == std::string::npos) {
+        return "";
+    }
+
+    const auto last = str.find_last_not_of(" \t");
+    return str.substr(first, last - first + 1);
 }
 
 struct Spec {
@@ -157,7 +169,7 @@ struct Spec {
 };
 
 struct BundleBoxPackageDependencies {
-    std::vector<Spec> dependencies;
+    std::vector<std::vector<Spec>> dependencies;
     std::vector<Spec> constrains;
 
 };
@@ -218,8 +230,7 @@ private:
 
 class BundleBoxProvider : public DependencyProvider<Range<Pack>, std::string> {
 public:
-
-    std::shared_ptr<Pool<Range<Pack>>> pool = std::make_shared<Pool<Range<Pack>>>(Pool<Range<Pack>>());
+    std::shared_ptr<Pool<Range<Pack>>> pool;
     std::unordered_map<std::string, OrderedMap<Pack, BundleBoxPackageDependencies>> packages;
     std::unordered_map<std::string, Pack> favored;
     std::unordered_map<std::string, Pack> locked;
@@ -230,8 +241,24 @@ public:
     bool sleep_before_return;
     std::unordered_set<NameId> requested_candidates;
     std::unordered_set<NameId> requested_dependencies;
+    std::unordered_map<std::pair<std::string, Pack>, SolvableId> solvable_ids;
 
-    std::vector<VersionSetId> requirements(const std::vector<std::string> &requirements) {
+    BundleBoxProvider()
+            : pool(std::make_shared<Pool<Range<Pack>>>(Pool<Range<Pack>>())),
+              cancel_solving(false),
+              sleep_before_return(false) {
+        DependencyProvider<Range<Pack>, std::string>::pool = this->pool;
+    }
+
+    std::vector<Requirement> requirements(const std::vector<std::string> &requirements) {
+        std::vector<Requirement> parsed_requirements;
+        for (const auto &dep: requirements) {
+            parsed_requirements.push_back(intern_requirement(parse_requirement(dep)));
+        }
+        return parsed_requirements;
+    }
+
+    std::vector<VersionSetId> version_sets(const std::vector<std::string> &requirements) {
         std::vector<VersionSetId> version_set_ids;
         for (const auto &dep: requirements) {
             auto spec = Spec::from_str(dep);
@@ -268,10 +295,10 @@ public:
     void add_package(const std::string &package_name, const Pack& package_version,
                      const std::vector<std::string> &package_dependencies,
                      const std::vector<std::string> &package_constrains) {
-        std::vector<Spec> deps;
+        std::vector<std::vector<Spec>> deps;
         deps.reserve(package_dependencies.size());
         for (const auto &dep: package_dependencies) {
-            deps.push_back(Spec::from_str(dep));
+            deps.push_back(parse_requirement(dep));
         }
 
         std::vector<Spec> cons;
@@ -281,6 +308,14 @@ public:
         }
 
         packages[package_name].insert(package_version, BundleBoxPackageDependencies{deps, cons});
+    }
+
+    SolvableId solvable_id(const std::string &package_name, const Pack &package_version) {
+        return get_or_intern_solvable(package_name, package_version);
+    }
+
+    SolvableId solvable_id(const std::string &package_name, uint32_t version) {
+        return solvable_id(package_name, Pack(version));
     }
 
     void sort_candidates(std::vector<SolvableId> &solvables) override {
@@ -312,8 +347,7 @@ public:
                                                                              : std::nullopt;
 
         for (const auto &pack : package.keys()) {
-
-            auto solvable_id = pool->intern_solvable(name_id, pack);
+            auto solvable_id = get_or_intern_solvable(package_name, pack);
 
             package_candidates.candidates.push_back(solvable_id);
             if (favored_pack.has_value() && favored_pack.value() == pack) {
@@ -359,10 +393,7 @@ public:
         auto deps = packages.at(package_name).at(pack);
         KnownDependencies result;
         for (const auto &req: deps.dependencies) {
-            auto dep_name = pool->intern_package_name(req.name);
-            auto dep_spec = pool->intern_version_set(dep_name, req.versions);
-
-            result.requirements.push_back(dep_spec);
+            result.requirements.push_back(intern_requirement(req));
         }
 
         for (const auto &req: deps.constrains) {
@@ -382,9 +413,51 @@ public:
         }
     }
 
+    std::vector<VersionSetId> version_sets_in_union(VersionSetUnionId version_set_union_id) override {
+        return pool->resolve_version_set_union(version_set_union_id);
+    }
+
 private:
-    std::vector<Spec> dependencies;
+    static std::vector<Spec> parse_requirement(const std::string &requirement) {
+        std::vector<Spec> specs;
+        for (const auto &part: split_string(requirement, "|")) {
+            specs.push_back(Spec::from_str(trim_string(part)));
+        }
+        return specs;
+    }
+
+    Requirement intern_requirement(const std::vector<Spec> &specs) {
+        assert(!specs.empty());
+
+        std::vector<VersionSetId> version_set_ids;
+        version_set_ids.reserve(specs.size());
+        for (const auto &spec: specs) {
+            auto dep_name = pool->intern_package_name(spec.name);
+            version_set_ids.push_back(pool->intern_version_set(dep_name, spec.versions));
+        }
+
+        if (version_set_ids.size() == 1) {
+            return requirement_single(version_set_ids[0]);
+        }
+
+        std::vector<VersionSetId> others(version_set_ids.begin() + 1, version_set_ids.end());
+        return requirement_union(pool->intern_version_set_union(version_set_ids.front(), others));
+    }
+
     std::vector<Spec> constrains;
+
+    SolvableId get_or_intern_solvable(const std::string &package_name, const Pack &pack) {
+        auto key = std::make_pair(package_name, pack);
+        auto it = solvable_ids.find(key);
+        if (it != solvable_ids.end()) {
+            return it->second;
+        }
+
+        auto name_id = pool->intern_package_name(package_name);
+        auto solvable_id = pool->intern_solvable(name_id, pack);
+        solvable_ids.insert(std::make_pair(key, solvable_id));
+        return solvable_id;
+    }
 };
 
 
@@ -405,7 +478,7 @@ std::string solve_snapshot(BundleBoxProvider &provider, const std::vector<std::s
     auto requirements = provider.requirements(specs);
     auto pool = provider.pool;
     auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
-    auto [steps, err] = solver.solve(requirements);
+    auto [steps, err] = solver.solve(Problem().requirements(requirements));
     if (err.has_value()) {
         auto problem = std::get<UnsolvableOrCancelled::Unsolvable>(err.value());
         std::stringstream output;
@@ -421,13 +494,13 @@ std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &s
     auto requirements = provider.requirements(specs);
     auto pool = provider.pool;
     auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
-    auto [steps, err] = solver.solve(requirements);
+    auto [steps, err] = solver.solve(Problem().requirements(requirements));
     if (err.has_value()) {
         std::string message = std::visit([&](auto &&arg) -> std::string {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, UnsolvableOrCancelled::Unsolvable>) {
                 auto unsolvable = std::any_cast<UnsolvableOrCancelled::Unsolvable>(arg);
-                auto optional_problem_graph = solver.graph(unsolvable.problem);
+                auto optional_problem_graph = solver.graph(unsolvable.conflict);
                 std::stringstream output;
                 const auto& graph = optional_problem_graph.value();
                 std::cout << graph.graphviz(pool, true) << std::endl;
@@ -455,7 +528,6 @@ std::string solve(BundleBoxProvider &provider, const std::vector<std::string> &s
 
 
 std::string solve_unsat(BundleBoxProvider &provider, const std::vector<std::string> &specs) {
-    reset_problem_count();
     std::vector<SolvableId> result;
     std::string message = solve(provider, specs, result);
     assert(result.empty());

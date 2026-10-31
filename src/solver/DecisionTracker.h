@@ -33,7 +33,7 @@ public:
         return map;
     }
 
-    auto get_stack() const {
+    const std::vector<Decision>& get_stack() const {
         return stack;
     }
 
@@ -88,10 +88,8 @@ public:
         stack.pop_back();
         map.reset(decision.solvable_id);
 
-        propagate_index = stack.size();
-
-        const Decision& top_decision = stack.back();
-        return std::make_pair(decision, map.level(top_decision.solvable_id));
+        propagate_index = std::min(propagate_index, stack.size());
+        return {decision, stack.empty() ? 0 : map.level(stack.back().solvable_id)};
     }
 
     std::optional<Decision> next_unpropagated() {

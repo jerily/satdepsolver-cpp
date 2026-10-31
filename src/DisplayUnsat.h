@@ -30,6 +30,22 @@ private:
     std::unordered_set<NodeIndex> installable_set;
     std::unordered_set<NodeIndex> missing_set;
 
+    std::optional<StringId> excluded_reason(SolvableId solvable) const {
+        for (const auto& node : graph.graph.nodes) {
+            const auto payload = node.get_payload();
+            const auto* candidate = std::get_if<ProblemNode::Solvable>(&payload);
+            if (!candidate || candidate->solvable != solvable) { continue; }
+            for (const auto& edge : graph.graph.outgoing_edges(node.get_id())) {
+                const auto weight = edge.get_weight();
+                const auto* conflict = std::get_if<ProblemEdge::Conflict>(&weight);
+                if (conflict && std::holds_alternative<ConflictCause::Excluded>(conflict->conflict_cause)) {
+                    return std::get<ProblemNode::Excluded>(edge.get_node_to().get_payload()).excluded;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
 public:
 // Constructor
     explicit DisplayUnsat(std::shared_ptr<Pool<VS, N>> poolRef, ProblemGraph graphRef)
@@ -45,7 +61,7 @@ public:
     }
 
     // toString method
-    std::string to_string() {
+    std::string to_string() const {
         std::ostringstream oss;
 
         //let (top_level_missing, top_level_conflicts): (Vec<_>, _) = self
@@ -78,44 +94,32 @@ public:
                 oss << "Error: " << e.what() << std::endl;
             }
 
-            // Conflicts caused by locked dependencies
-            auto edges = graph.graph.outgoing_edges(graph.root_node);
+            // Each lock can forbid several candidates; report it once and
+            // retain the exclusion reason when the locked candidate is unusable.
+            std::unordered_set<SolvableId> reported_locked;
+            std::vector<std::string> lines;
+            for (const auto& edge : root_edges) {
+                const auto weight = edge.get_weight();
+                const auto* conflict = std::get_if<ProblemEdge::Conflict>(&weight);
+                if (!conflict) { continue; }
+                if (const auto* constraint = std::get_if<ConflictCause::Constrains>(&conflict->conflict_cause)) {
+                    lines.push_back("the constraint " + display_requirement(pool, requirement_single(constraint->version)) +
+                                    " cannot be fulfilled");
+                } else if (const auto* locked = std::get_if<ConflictCause::Locked>(&conflict->conflict_cause)) {
+                    if (!reported_locked.insert(locked->solvable).second) { continue; }
+                    auto name = pool->resolve_package_name(pool->resolve_solvable(locked->solvable).get_name_id());
+                    auto version = DisplayMergedSolvable<VS, N>(pool, {locked->solvable}).to_string();
+                    auto reason = excluded_reason(locked->solvable);
+                    lines.push_back(name + " " + version + (reason
+                        ? " is locked, but it is excluded because " + pool->resolve_string(*reason)
+                        : " is locked, but another version is required as reported above"));
+                }
+            }
             auto indenter = Indenter(true);
-
-            for (auto it = edges.begin(); it != edges.end(); ++it) {
-                const auto& edge = *it;
-
-                //                let conflict = match e.weight() {
-                //                    ProblemEdge::Requires(_) => continue,
-                //                    ProblemEdge::Conflict(conflict) => conflict,
-                //                };
-
-                if (!std::holds_alternative<ProblemEdge::Conflict>(edge.get_weight())) {
-                    continue;
-                }
-
-                auto peek_next = std::next(it);
-                auto has_more_conflicts = std::any_of(peek_next, edges.end(), [](const auto &next) {
-                    return std::holds_alternative<ProblemEdge::Conflict>(next.get_weight());
-                });
-                auto child_order = has_more_conflicts ? ChildOrder::HasRemainingSiblings : ChildOrder::Last;
-                indenter = indenter.push_level_with_order(child_order);
-                auto indent = indenter.get_indent();
-
-                auto conflict = std::get<ProblemEdge::Conflict>(edge.get_weight()).conflict_cause;
-
-                if (std::holds_alternative<ConflictCause::Constrains>(conflict) || std::holds_alternative<ConflictCause::ForbidMultipleInstances>(conflict)) {
-                    // Root constraints are already described by fmt_graph.
-                    continue;
-                } else if (std::holds_alternative<ConflictCause::Locked>(conflict)) {
-                    auto locked_solvable = std::get<ConflictCause::Locked>(conflict).solvable;
-                    auto locked = pool->resolve_solvable(locked_solvable);
-                    auto display_name = DisplayName<VS, N>(pool, locked.get_name_id());
-                    auto display_merged_solvable = DisplayMergedSolvable<VS, N>(pool, {locked_solvable});
-                    oss << indent << display_name.to_string() << " " << display_merged_solvable.to_string() << " is locked, but another version is required as reported above" << std::endl;
-                } else if (std::holds_alternative<ConflictCause::Excluded>(conflict)) {
-                    continue;
-                }
+            for (size_t i = 0; i < lines.size(); ++i) {
+                auto child = indenter.push_level_with_order(i + 1 == lines.size()
+                    ? ChildOrder::Last : ChildOrder::HasRemainingSiblings);
+                oss << child.get_indent() << lines[i] << std::endl;
             }
         }
 

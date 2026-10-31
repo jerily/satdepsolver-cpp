@@ -417,46 +417,26 @@ public:
         } else {
             for (size_t i = 0; i < range.segments.size(); ++i) {
                 auto [start, end] = range.segments[i];
-                os << std::visit([](auto &&start_arg, auto &&end_arg) -> std::string {
-                    using T_start = std::decay_t<decltype(start_arg)>;
-                    using T_end = std::decay_t<decltype(end_arg)>;
-
-                    if constexpr (std::is_same_v<T_start, Unbounded> && std::is_same_v<T_end, Unbounded>) {
-                        return "*";
-                    } else if constexpr (std::is_same_v<T_start, Unbounded> && std::is_same_v<T_end, Included<V>>) {
-                        auto e = std::any_cast<Included<V>>(end_arg);
-                        return "<=" + e.value;
-                    } else if constexpr (std::is_same_v<T_start, Unbounded> && std::is_same_v<T_end, Excluded<V>>) {
-                        auto e = std::any_cast<Excluded<V>>(end_arg);
-                        return "<" + e.value;
-                    } else if constexpr (std::is_same_v<T_start, Included<V>> && std::is_same_v<T_end, Unbounded>) {
-                        auto s = std::any_cast<Included<V>>(start_arg);
-                        return ">=" + s.value;
-                    } else if constexpr (std::is_same_v<T_start, Included<V>> && std::is_same_v<T_end, Included<V>>) {
-                        auto s = std::any_cast<Included<V>>(start_arg);
-                        auto e = std::any_cast<Included<V>>(end_arg);
-                        auto v_start = s.value;
-                        auto v_end = e.value;
-                        if (v_start == v_end) {
-                            return "" + v_start;
-                        } else {
-                            return ">=" + v_start + ", <=" + v_end;
+                if (i != 0) { os << " | "; }
+                std::visit([&os](const auto& lower, const auto& upper) {
+                    using Lower = std::decay_t<decltype(lower)>;
+                    using Upper = std::decay_t<decltype(upper)>;
+                    if constexpr (std::is_same_v<Lower, Unbounded> && std::is_same_v<Upper, Unbounded>) {
+                        os << "*";
+                    } else {
+                        if constexpr (std::is_same_v<Lower, Included<V>> && std::is_same_v<Upper, Included<V>>) {
+                            if (lower.value == upper.value) {
+                                os << lower.value;
+                                return;
+                            }
                         }
-                    } else if constexpr (std::is_same_v<T_start, Included<V>> && std::is_same_v<T_end, Excluded<V>>) {
-                        auto s = std::any_cast<Included<V>>(start_arg);
-                        auto e = std::any_cast<Excluded<V>>(end_arg);
-                        return ">=" + s.value + ", <" + e.value;
-                    } else if constexpr (std::is_same_v<T_start, Excluded<V>> && std::is_same_v<T_end, Unbounded>) {
-                        auto s = std::any_cast<Excluded<V>>(start_arg);
-                        return ">" + s.value;
-                    } else if constexpr (std::is_same_v<T_start, Excluded<V>> && std::is_same_v<T_end, Included<V>>) {
-                        auto s = std::any_cast<Excluded<V>>(start_arg);
-                        auto e = std::any_cast<Included<V>>(end_arg);
-                        return ">" + s.value + ", <=" + e.value;
-                    } else if constexpr (std::is_same_v<T_start, Excluded<V>> && std::is_same_v<T_end, Excluded<V>>) {
-                        auto s = std::any_cast<Excluded<V>>(start_arg);
-                        auto e = std::any_cast<Excluded<V>>(end_arg);
-                        return ">" + s.value + ", <" + e.value;
+                        if constexpr (!std::is_same_v<Lower, Unbounded>) {
+                            os << (std::is_same_v<Lower, Included<V>> ? ">=" : ">") << lower.value;
+                        }
+                        if constexpr (!std::is_same_v<Upper, Unbounded>) {
+                            if constexpr (!std::is_same_v<Lower, Unbounded>) { os << ", "; }
+                            os << (std::is_same_v<Upper, Included<V>> ? "<=" : "<") << upper.value;
+                        }
                     }
                 }, start, end);
             }

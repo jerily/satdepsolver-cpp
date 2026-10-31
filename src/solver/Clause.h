@@ -203,7 +203,10 @@ inline std::tuple<Clause::Constrains, std::optional<std::array<SolvableId, 2>>, 
     bool conflict = decision_tracker.assigned_value(forbidden_solvable) == true;
     auto kind = Clause::Constrains{parent, forbidden_solvable, via};
 
-    // return clause, (parent, forbidden_solvable), conflict
+    // A constraint excluding its own parent reduces to a negative assertion.
+    if (parent == forbidden_solvable) {
+        return std::make_tuple(kind, std::nullopt, conflict);
+    }
     return std::make_tuple(kind, std::array<SolvableId, 2>{parent, forbidden_solvable}, conflict);
 }
 
@@ -281,9 +284,9 @@ inline void Clause::visit_literals(
         } else if constexpr (std::is_same_v<T, Clause::Requires>) {
             auto clause_variant = std::any_cast<Clause::Requires>(arg);
             visit(Literal(clause_variant.parent, true));
-            auto optional_sorted_candidates = requirement_to_sorted_candidates.get(clause_variant.requirement);
-            if (optional_sorted_candidates.has_value()) {
-                for (const SolvableId &id: optional_sorted_candidates.value()) {
+            auto optional_sorted_candidates = requirement_to_sorted_candidates.get_ref(clause_variant.requirement);
+            if (optional_sorted_candidates != nullptr) {
+                for (const SolvableId &id: *optional_sorted_candidates) {
                     visit(Literal(id, false));
                 }
             }
@@ -447,12 +450,12 @@ public:
                 }
 
                 // The available candidates
-                auto optional_candidates = requirement_to_sorted_candidates.get(clause_variant.requirement);
-                if (!optional_candidates.has_value()) {
+                auto optional_candidates = requirement_to_sorted_candidates.get_ref(clause_variant.requirement);
+                if (!optional_candidates) {
                     return std::nullopt;
                 }
 
-                const auto &candidates = optional_candidates.value();
+                const auto &candidates = *optional_candidates;
                 auto it = std::find_if(candidates.begin(), candidates.end(), [&](const SolvableId &candidate) {
                     return can_watch(Literal(candidate, false));
                 });

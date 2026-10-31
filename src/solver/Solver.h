@@ -10,6 +10,7 @@
 #include <any>
 #include <set>
 #include <queue>
+#include <deque>
 #include "../internal/SolvableId.h"
 #include "../internal/NameId.h"
 #include "../internal/VersionSetId.h"
@@ -53,7 +54,7 @@ namespace TaskResult {
     struct SortedCandidates {
         SolvableId solvable_id;
         Requirement requirement;
-        std::vector<SolvableId> candidates;
+        const std::vector<SolvableId>* candidates;
     };
 
     struct NonMatchingCandidates {
@@ -86,6 +87,9 @@ private:
 
     std::unordered_set<NameId> clauses_added_for_package_;
     std::unordered_set<SolvableId> clauses_added_for_solvable_;
+    // Only skip future scans when every candidate has been queued. Metadata for
+    // an unqueued candidate can become available through another requirement.
+    std::unordered_set<Requirement> fully_queued_requirements_;
 
     DecisionTracker decision_tracker_;
 
@@ -107,7 +111,7 @@ public:
             cache(SolverCache<VS, N, D>(provider)) {}
 
     std::pair<std::vector<SolvableId>, std::optional<UnsolvableOrCancelledVariant>>
-    solve(const Problem &problem) {
+    solve(const Problem &problem) try {
         // Clear state
         decision_tracker_.clear();
         requires_clauses_.clear();
@@ -118,6 +122,7 @@ public:
         learnt_why_ = Mapping<LearntClauseId, std::vector<ClauseId>>();
         clauses_added_for_package_.clear();
         clauses_added_for_solvable_.clear();
+        fully_queued_requirements_.clear();
         clauses_.clear();
         root_requirements_ = problem.requirements();
         root_constraints_ = problem.constraints();
@@ -150,6 +155,9 @@ public:
         }
 
         return std::make_pair(steps, err);
+    } catch (const SolverCancelled& cancelled) {
+        decision_tracker_.clear();
+        return {{}, UnsolvableOrCancelled::Cancelled{std::string(cancelled.what())}};
     }
 
     std::pair<std::vector<SolvableId>, std::optional<UnsolvableOrCancelledVariant>>
@@ -195,7 +203,7 @@ public:
         auto output = AddClauseOutput<SolvableId, Requirement, ClauseId>();
 
         // Mark the initial seen solvables as seen
-        std::vector<SolvableId> pending_solvables;
+        std::deque<SolvableId> pending_solvables;
         for (auto &solvable_id: solvable_ids) {
             if (clauses_added_for_solvable_.insert(solvable_id).second) {
                 pending_solvables.push_back(solvable_id);
@@ -203,14 +211,13 @@ public:
         }
 
 
-        std::unordered_set<SolvableId> seen(pending_solvables.begin(), pending_solvables.end());
-        std::vector<std::future<TaskResultVariant>> pending_futures;
+        std::deque<std::future<TaskResultVariant>> pending_futures;
         while (true) {
             // Iterate over all pending solvables and request their dependencies.
             while (!pending_solvables.empty()) {
                 // pop the first element
                 auto solvable_id = pending_solvables.front();
-                pending_solvables.erase(pending_solvables.begin());
+                pending_solvables.pop_front();
 
                 auto display_pending = DisplaySolvable(pool, pool->resolve_internal_solvable(solvable_id));
                 tracing::trace(
@@ -274,10 +281,10 @@ public:
             //                break;
             //            };
 
-            auto result = pending_futures.front().get();;  // pending_futures.next()
-            pending_futures.erase(pending_futures.begin());  // pending_futures.pop_front()
+            auto result = pending_futures.front().get();
+            pending_futures.pop_front();
 
-            auto continue_p = std::visit([this, &output, &pending_futures, &pending_solvables, &seen](auto &&arg) {
+            auto continue_p = std::visit([this, &output, &pending_futures, &pending_solvables](auto &&arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, TaskResult::Dependencies>) {
                     auto task_result = std::any_cast<TaskResult::Dependencies>(arg);
@@ -361,9 +368,9 @@ public:
                                 for (const auto &requirement: requirements) {
                                     // Find all the solvable that match for the given version set
                                     pending_futures.emplace_back(std::async(std::launch::deferred, [this, solvable_id, requirement]() -> TaskResultVariant {
-                                        auto sorted_candidates = cache.get_or_cache_sorted_candidates(requirement);
+                                        const auto& sorted_candidates = cache.get_or_cache_sorted_candidates(requirement);
                                         return TaskResult::SortedCandidates{solvable_id, requirement,
-                                                                         sorted_candidates};
+                                                                         &sorted_candidates};
                                     }));
                                 }
 
@@ -439,19 +446,37 @@ public:
                     auto task_result = std::any_cast<TaskResult::SortedCandidates>(arg);
                     auto solvable_id = task_result.solvable_id;
                     auto requirement = task_result.requirement;
-                    auto candidates = task_result.candidates;
+                    const auto& candidates = *task_result.candidates;
                     tracing::trace(
                             "--- sorted candidates available for %s\n",
                             display_requirement(pool, requirement).c_str()
                     );
 
+                    // A self-satisfying requirement is a tautology (not P or P).
+                    // Our watches are keyed by solvable, so do not attach both
+                    // polarities of the same variable to the linked watch list.
+                    if (std::find(candidates.begin(), candidates.end(), solvable_id) != candidates.end()) {
+                        return false;
+                    }
+
                     // Queue requesting the dependencies of the candidates as well if they are cheaply
                     // available from the dependency provider.
 
-                    for (auto &candidate: candidates) {
-                        if (seen.insert(candidate).second && cache.are_dependencies_available_for(candidate) &&
-                            clauses_added_for_solvable_.insert(candidate).second) {
-                            pending_solvables.emplace_back(candidate);
+                    if (fully_queued_requirements_.find(requirement) == fully_queued_requirements_.end()) {
+                        bool all_queued = true;
+                        for (auto candidate : candidates) {
+                            if (clauses_added_for_solvable_.find(candidate) != clauses_added_for_solvable_.end()) {
+                                continue;
+                            }
+                            if (cache.are_dependencies_available_for(candidate)) {
+                                clauses_added_for_solvable_.insert(candidate);
+                                pending_solvables.push_back(candidate);
+                            } else {
+                                all_queued = false;
+                            }
+                        }
+                        if (all_queued) {
+                            fully_queued_requirements_.insert(requirement);
                         }
                     }
 
@@ -507,7 +532,11 @@ public:
                                 Clause::constrains(solvable_id, forbidden_candidate, version_set_id,
                                                    decision_tracker_);
                         auto constrains_clause_id = clauses_.alloc(constrains_clause);
-                        output.clauses_to_watch.push_back(constrains_clause_id);
+                        if (constrains_clause.has_watches()) {
+                            output.clauses_to_watch.push_back(constrains_clause_id);
+                        } else {
+                            output.negative_assertions.emplace_back(solvable_id, constrains_clause_id);
+                        }
 
                         if (conflict) {
                             output.conflicting_clauses.push_back(constrains_clause_id);
@@ -613,7 +642,7 @@ public:
                                 }
                             } else if constexpr (std::is_same_v<T, PropagationError::Cancelled>) {
                                 auto arg_cancelled = std::any_cast<PropagationError::Cancelled>(arg);
-                                return std::optional(UnsolvableOrCancelled::Cancelled{arg_cancelled});
+                                return std::optional(UnsolvableOrCancelled::Cancelled{arg_cancelled.data});
                             }
                             return std::nullopt;
                         }, propagate_result.value());
@@ -788,8 +817,9 @@ public:
             }
 
             // Consider only clauses in which no candidates have been installed
-            auto optional_candidates = cache.requirement_to_sorted_candidates.get(deps);
-            auto candidates = optional_candidates.value();
+            const auto* cached_candidates = cache.requirement_to_sorted_candidates.get_ref(deps);
+            assert(cached_candidates);
+            const auto& candidates = *cached_candidates;
 
             // Either find the first assignable candidate or determine that one of the candidates is
             // already assigned in which case the clause has already been satisfied.
@@ -1323,6 +1353,7 @@ public:
         uint32_t causes_at_current_level = 0;
         std::vector<Literal> learnt;
         uint32_t back_track_to = 0;
+        size_t highest_level_idx = 0;
 
         std::vector<ClauseId> learnt_why;
         bool first_iteration = true;
@@ -1332,7 +1363,7 @@ public:
 
             auto &clause = clauses_[clause_id];
             Clause::visit_literals(clause.kind_, learnt_clauses_, cache.requirement_to_sorted_candidates,
-                                   [&first_iteration, &seen, &current_level, &causes_at_current_level, &back_track_to, &conflicting_solvable,
+                                   [&first_iteration, &seen, &current_level, &causes_at_current_level, &back_track_to, &highest_level_idx, &conflicting_solvable,
                                            &learnt, this](const Literal &literal) {
                                        if (!first_iteration && literal.solvable_id == conflicting_solvable) {
                                            // We are only interested in the causes of the conflict, so we ignore the
@@ -1352,8 +1383,11 @@ public:
                                            auto learnt_literal = Literal(literal.solvable_id,
                                                                          decision_tracker_.assigned_value(
                                                                                  literal.solvable_id).value());
+                                           if (decision_level > back_track_to) {
+                                               back_track_to = decision_level;
+                                               highest_level_idx = learnt.size();
+                                           }
                                            learnt.push_back(learnt_literal);
-                                           back_track_to = std::max(back_track_to, decision_level);
                                        } else {
                                            throw std::runtime_error("Unreachable");
                                        }
@@ -1384,6 +1418,11 @@ public:
         }
 
 
+        // Watch the asserting literal and the highest-level remaining literal.
+        // These are unassigned last on backtracking, minimizing watch movement.
+        if (!learnt.empty()) {
+            std::swap(learnt.front(), learnt[highest_level_idx]);
+        }
         auto last_literal = Literal(conflicting_solvable, s_value);
         learnt.push_back(last_literal);
 
@@ -1449,7 +1488,7 @@ public:
                     auto package_node_index = conflict.add_node(graph, nodes, clause_variant.parent);
                     auto package_node = graph.get_node(package_node_index);
 
-                    auto sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
+                    const auto& sorted_candidates = cache.get_or_cache_sorted_candidates(clause_variant.requirement);
                     if (!sorted_candidates.empty()) {
                         for (const SolvableId &candidate_id: sorted_candidates) {
 

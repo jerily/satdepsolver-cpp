@@ -15,7 +15,13 @@ public:
     FrozenMap(std::shared_ptr<std::unordered_map<K, V>> map) : map(map) {}
 
     void insert(K key, V value) {
-        map->insert(std::make_pair(key, value));
+        map->emplace(std::move(key), std::move(value));
+    }
+
+    // Entries are never erased; references survive insertion and rehashing.
+    const V* get_ref(const K& key) const {
+        auto it = map->find(key);
+        return it == map->end() ? nullptr : &it->second;
     }
 
     std::optional<V> get(const K& key) const {

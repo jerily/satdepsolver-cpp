@@ -982,7 +982,7 @@ int main(int argc, char *argv[]) {
     test_resolve_with_nonexisting();
     test_resolve_with_nested_deps();
     test_resolve_with_unknown_deps();
-//    test_resolve_and_cancel();
+    test_resolve_and_cancel();
     test_resolve_locked_and_top_level();
     test_resolve_ignored_locked_top_level();
     test_resolve_favor_without_conflict();

@@ -1,6 +1,9 @@
 #ifndef LEARNTCLAUSEID_H
 #define LEARNTCLAUSEID_H
 
+#include <sstream>
+#include <functional>
+#include <string>
 #include "ArenaId.h"
 
 class LearntClauseId : public ArenaId {

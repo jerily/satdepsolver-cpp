@@ -6,7 +6,7 @@
 
 namespace UnsolvableOrCancelled {
     struct Unsolvable {
-        Problem problem;
+        Conflict conflict;
     };
     struct Cancelled {
         std::any data;

@@ -4,6 +4,8 @@
 #include <memory>
 #include <any>
 #include <future>
+#include <unordered_set>
+#include "../internal/SolverCancelled.h"
 #include "../internal/CandidatesId.h"
 #include "../internal/DependenciesId.h"
 #include "../internal/FrozenCopyMap.h"
@@ -24,8 +26,8 @@ public:
 
 //    std::pair<VS, N> _data;
 
-    // A mapping of `VersionSetId` to a sorted list of candidates that match that set.
-    FrozenMap<VersionSetId, std::vector<SolvableId>> version_set_to_sorted_candidates;
+    // A mapping of `Requirement` to a sorted list of candidates that satisfy it.
+    FrozenMap<Requirement, std::vector<SolvableId>> requirement_to_sorted_candidates;
 
     explicit SolverCache(D provider) : provider(provider) {}
 
@@ -47,11 +49,16 @@ public:
             // Since getting the candidates from the provider is a potentially blocking
             // operation, we want to check beforehand whether we should cancel the solving
             // process
-            if (provider.should_cancel_with_value().has_value()) {
-               throw std::runtime_error("Solver cancelled");
-            }
-
+            check_cancelled();
             auto package_candidates = provider.get_candidates(package_name).value_or(PackageCandidates());
+            check_cancelled();
+            for (const auto solvable : package_candidates.hint_dependencies_available) {
+                const auto index = solvable.to_usize();
+                if (hint_dependencies_available.size() <= index) {
+                    hint_dependencies_available.resize(index + 1, false);
+                }
+                hint_dependencies_available[index] = true;
+            }
             auto package_candidates_id = candidates.alloc(package_candidates);
             package_name_to_candidates.insert_copy(package_name, package_candidates_id);
             return candidates[package_candidates_id];
@@ -111,28 +118,28 @@ public:
     //
     // If the provider has requested the solving process to be cancelled, the cancellation value
     // will be returned as an `Err(...)`.
-    std::vector<SolvableId> get_or_cache_sorted_candidates(VersionSetId version_set_id) {
-        auto optional_candidates = version_set_to_sorted_candidates.get(version_set_id);
-        if (optional_candidates.has_value()) {
-            return optional_candidates.value();
-        } else {
-            auto package_name = get_pool()->resolve_version_set_package_name(version_set_id);
-            auto matching_candidates = get_or_cache_matching_candidates(version_set_id);
-            auto package_candidates = get_or_cache_candidates(package_name);
-            std::vector<SolvableId> sorted_candidates;
-            sorted_candidates.insert(sorted_candidates.end(), matching_candidates.begin(), matching_candidates.end());
-            provider.sort_candidates(sorted_candidates);
-            auto favored_id = package_candidates.favored;
-            if (favored_id.has_value()) {
-                auto pos = std::find(sorted_candidates.begin(), sorted_candidates.end(), favored_id.value());
-                if (pos != sorted_candidates.end()) {
-                    std::rotate(sorted_candidates.begin(), pos, pos + 1);
+    const std::vector<SolvableId>& get_or_cache_sorted_candidates(const Requirement &requirement) {
+        if (requirement.is_single()) {
+            return get_or_cache_sorted_candidates_for_version_set(requirement.version_set());
+        }
+
+        if (auto candidates = requirement_to_sorted_candidates.get_ref(requirement)) {
+            return *candidates;
+        }
+
+        std::vector<SolvableId> sorted_candidates;
+        std::unordered_set<SolvableId> seen;
+        for (const auto &version_set_id: provider.version_sets_in_union(requirement.version_set_union())) {
+            const auto& candidates = get_or_cache_sorted_candidates_for_version_set(version_set_id);
+            for (auto candidate : candidates) {
+                if (seen.insert(candidate).second) {
+                    sorted_candidates.push_back(candidate);
                 }
             }
-
-            version_set_to_sorted_candidates.insert(version_set_id, sorted_candidates);
-            return sorted_candidates;
         }
+
+        requirement_to_sorted_candidates.insert(requirement, std::move(sorted_candidates));
+        return *requirement_to_sorted_candidates.get_ref(requirement);
     }
 
     // Returns the dependencies of a solvable. Requests the solvables from the
@@ -148,12 +155,9 @@ public:
             // Since getting the dependencies from the provider is a potentially blocking
             // operation, we want to check beforehand whether we should cancel the solving
             // process
-            if (provider.should_cancel_with_value().has_value()) {
-                fprintf(stderr, "solver cancelled");
-                throw std::runtime_error("Solver cancelled");
-            }
-
+            check_cancelled();
             auto dependencies = provider.get_dependencies(solvable_id);
+            check_cancelled();
             auto dependencies_id = solvable_dependencies.alloc(dependencies);
             solvable_to_dependencies.insert_copy(solvable_id, dependencies_id);
             return solvable_dependencies[dependencies_id];
@@ -178,6 +182,36 @@ public:
     }
 
 private:
+    void check_cancelled() {
+        if (auto reason = provider.should_cancel_with_value()) {
+            throw SolverCancelled(*reason);
+        }
+    }
+
+    const std::vector<SolvableId>& get_or_cache_sorted_candidates_for_version_set(VersionSetId version_set_id) {
+        auto requirement = requirement_single(version_set_id);
+        if (auto candidates = requirement_to_sorted_candidates.get_ref(requirement)) {
+            return *candidates;
+        }
+
+        auto package_name = get_pool()->resolve_version_set_package_name(version_set_id);
+        auto matching_candidates = get_or_cache_matching_candidates(version_set_id);
+        auto package_candidates = get_or_cache_candidates(package_name);
+        std::vector<SolvableId> sorted_candidates;
+        sorted_candidates.insert(sorted_candidates.end(), matching_candidates.begin(), matching_candidates.end());
+        provider.sort_candidates(sorted_candidates);
+        auto favored_id = package_candidates.favored;
+        if (favored_id.has_value()) {
+            auto pos = std::find(sorted_candidates.begin(), sorted_candidates.end(), favored_id.value());
+            if (pos != sorted_candidates.end()) {
+                std::rotate(sorted_candidates.begin(), pos, pos + 1);
+            }
+        }
+
+        requirement_to_sorted_candidates.insert(requirement, std::move(sorted_candidates));
+        return *requirement_to_sorted_candidates.get_ref(requirement);
+    }
+
     // A mapping from package name to a list of candidates.
     Arena<CandidatesId, PackageCandidates> candidates;
     FrozenCopyMap<NameId, CandidatesId> package_name_to_candidates;

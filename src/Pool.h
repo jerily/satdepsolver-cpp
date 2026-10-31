@@ -12,6 +12,7 @@
 #include "internal/NameId.h"
 #include "internal/SolvableId.h"
 #include "internal/VersionSetId.h"
+#include "internal/VersionSetUnionId.h"
 #include "internal/ClauseId.h"
 #include "internal/Arena.h"
 #include "internal/FrozenCopyMap.h"
@@ -45,6 +46,8 @@ public:
 
     // Interned match specs
     Arena<VersionSetId, std::pair<NameId, VS>> version_sets;
+    // Interned unions of version sets
+    Arena<VersionSetUnionId, std::vector<VersionSetId>> version_set_unions;
 
     Pool() {
 // Initialize with a root solvable if needed
@@ -161,6 +164,28 @@ public:
     // Panics if the version set is not found in the pool
     NameId resolve_version_set_package_name(VersionSetId id) const {
         return version_sets[id].first;
+    }
+
+    // Interns a union of two or more version sets into the [`Pool`], returning its
+    // [`VersionSetUnionId`].
+    //
+    // Version set unions are not deduplicated. A unique id is returned on every invocation.
+    VersionSetUnionId intern_version_set_union(
+            const VersionSetId &first,
+            const std::vector<VersionSetId> &others
+    ) {
+        std::vector<VersionSetId> union_version_sets;
+        union_version_sets.reserve(others.size() + 1);
+        union_version_sets.push_back(first);
+        union_version_sets.insert(union_version_sets.end(), others.begin(), others.end());
+        return version_set_unions.alloc(union_version_sets);
+    }
+
+    // Returns the version sets associated with the provided union id.
+    //
+    // Panics if the version set union is not found in the pool.
+    const std::vector<VersionSetId> &resolve_version_set_union(VersionSetUnionId id) const {
+        return version_set_unions[id];
     }
 };
 

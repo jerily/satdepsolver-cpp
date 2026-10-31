@@ -1,6 +1,8 @@
 #include "solver.h"
 //#include "resolvo/internal/tracing.h"
 
+static_assert(std::has_virtual_destructor_v<BundleBoxProvider>);
+
 void test_unit_propagation_1() {
     // test_unit_propagation_1
     auto provider = BundleBoxProvider::from_packages({{{"asdf"}, 1, std::vector<std::string>()}});
@@ -90,8 +92,10 @@ bool check_equal_to_snapshot(const char* func, const S& snapshot) {
         snapshot_from_file += buffer;
     }
 
-    std::set<std::string> snapshot_lines;
-    std::set<std::string> snapshot_from_file_lines;
+    fclose(fp);
+
+    std::multiset<std::string> snapshot_lines;
+    std::multiset<std::string> snapshot_from_file_lines;
 
     std::istringstream snapshot_stream(snapshot);
     std::string line;
@@ -344,6 +348,22 @@ void test_constrains_with_and_without_conflict() {
     assert(panicked);
 }
 
+void test_decision_tracker_undo_until_zero_clears_state() {
+    auto decisions = DecisionTracker();
+    auto solvable1 = SolvableId::from_usize(1);
+    auto solvable2 = SolvableId::from_usize(2);
+
+    assert(decisions.try_add_decision(Decision{solvable1, true, ClauseId::null()}, 1).value());
+    assert(decisions.try_add_decision(Decision{solvable2, false, ClauseId::null()}, 2).value());
+
+    decisions.undo_until(0);
+
+    assert(decisions.is_empty());
+    assert(!decisions.assigned_value(solvable1).has_value());
+    assert(!decisions.assigned_value(solvable2).has_value());
+    assert(!decisions.next_unpropagated().has_value());
+}
+
 void test_clause_size() {
     fprintf(stderr, "ClauseState size: %lu - ClauseVariant size: %lu\n", sizeof(ClauseState), sizeof(ClauseVariant));
     assert(sizeof(ClauseState) == 32);
@@ -526,6 +546,151 @@ void test_resolve_cyclic() {
 
     auto result = transaction_to_string(pool, solved);
     assert_snapshot(result);
+}
+
+void test_explicit_root_requirements() {
+    auto provider = BundleBoxProvider::from_packages({{{"a"}, 1, std::vector<std::string>{"b"}},
+                                                      {{"b"}, 1, std::vector<std::string>{"c"}},
+                                                      {{"b"}, 2, std::vector<std::string>{"c 1..2"}},
+                                                      {{"c"}, 1, std::vector<std::string>()},
+                                                      {{"c"}, 2, std::vector<std::string>()},
+                                                      {{"c"}, 3, std::vector<std::string>()},
+                                                      {{"c"}, 4, std::vector<std::string>()},
+                                                      {{"c"}, 5, std::vector<std::string>()}});
+    auto requirements = provider.requirements({"a", "c"});
+    auto pool = provider.pool;
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
+    auto [solved, err] = solver.solve(Problem().requirements(requirements));
+
+    assert(!err.has_value());
+    assert(solved.size() == 3);
+
+    std::unordered_map<std::string, uint32_t> selected_versions;
+    for (const auto &solvable_id: solved) {
+        auto solvable = pool->resolve_solvable(solvable_id);
+        selected_versions[pool->resolve_package_name(solvable.get_name_id())] = solvable.get_inner().version;
+    }
+
+    assert(selected_versions["a"] == 1);
+    assert(selected_versions["b"] == 1);
+    assert(selected_versions["c"] == 5);
+}
+
+void test_problem_with_constraints() {
+    auto provider = BundleBoxProvider::from_packages({{{"a"}, 1, std::vector<std::string>{"b 0..10"}},
+                                                      {{"b"}, 1, std::vector<std::string>()},
+                                                      {{"b"}, 2, std::vector<std::string>()},
+                                                      {{"c"}, 1, std::vector<std::string>()}});
+    auto requirements = provider.requirements({"a 0..10"});
+    auto constraints = provider.version_sets({"b 1..2", "c"});
+    auto pool = provider.pool;
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
+    auto [solved, err] = solver.solve(Problem().requirements(requirements).constraints(constraints));
+
+    assert(!err.has_value());
+    assert(solved.size() == 2);
+
+    std::unordered_map<std::string, uint32_t> selected_versions;
+    for (const auto &solvable_id: solved) {
+        auto solvable = pool->resolve_solvable(solvable_id);
+        selected_versions[pool->resolve_package_name(solvable.get_name_id())] = solvable.get_inner().version;
+    }
+
+    assert(selected_versions["a"] == 1);
+    assert(selected_versions["b"] == 1);
+    assert(selected_versions.find("c") == selected_versions.end());
+}
+
+void test_problem_with_soft_requirements() {
+    auto provider = BundleBoxProvider::from_packages({{{"a"}, 1, std::vector<std::string>{"b 0..10"}},
+                                                      {{"b"}, 1, std::vector<std::string>()},
+                                                      {{"b"}, 2, std::vector<std::string>()},
+                                                      {{"c"}, 1, std::vector<std::string>()},
+                                                      {{"d"}, 1, std::vector<std::string>{"c"}},
+                                                      {{"locked"}, 1, std::vector<std::string>()},
+                                                      {{"locked"}, 2, std::vector<std::string>()}});
+    provider.set_locked("locked", 2);
+
+    auto requirements = provider.requirements({"a 0..10"});
+    auto constraints = provider.version_sets({"b 1..2"});
+    std::vector<SolvableId> soft_requirements = {
+            provider.solvable_id("c", 1),
+            provider.solvable_id("d", 1),
+            provider.solvable_id("locked", 1),
+            provider.solvable_id("unknown-deps", Pack(1).with_unknown_deps())
+    };
+
+    auto pool = provider.pool;
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
+    auto [solved, err] = solver.solve(
+            Problem().requirements(requirements).constraints(constraints).soft_requirements(soft_requirements));
+
+    assert(!err.has_value());
+    assert(solved.size() == 5);
+
+    std::unordered_map<std::string, uint32_t> selected_versions;
+    for (const auto &solvable_id: solved) {
+        auto solvable = pool->resolve_solvable(solvable_id);
+        selected_versions[pool->resolve_package_name(solvable.get_name_id())] = solvable.get_inner().version;
+    }
+
+    assert(selected_versions["a"] == 1);
+    assert(selected_versions["b"] == 1);
+    assert(selected_versions["c"] == 1);
+    assert(selected_versions["d"] == 1);
+    assert(selected_versions["locked"] == 1);
+    assert(selected_versions.find("unknown-deps") == selected_versions.end());
+}
+
+void test_resolve_union_requirements() {
+    auto provider = BundleBoxProvider::from_packages({{{"a"}, 1, std::vector<std::string>()},
+                                                      {{"b"}, 1, std::vector<std::string>()},
+                                                      {{"c"}, 1, std::vector<std::string>{"a"}},
+                                                      {{"d"}, 1, std::vector<std::string>{"b"}},
+                                                      {{"e"}, 1, std::vector<std::string>{"a | b"}}});
+    provider.add_package("f", Pack(1), {"b"}, {"a 2"});
+
+    auto requirements = provider.requirements({"c | d", "e", "f"});
+    auto pool = provider.pool;
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
+    auto [solved, err] = solver.solve(Problem().requirements(requirements));
+
+    assert(!err.has_value());
+    assert(solved.size() == 4);
+
+    std::unordered_map<std::string, uint32_t> selected_versions;
+    for (const auto &solvable_id: solved) {
+        auto solvable = pool->resolve_solvable(solvable_id);
+        selected_versions[pool->resolve_package_name(solvable.get_name_id())] = solvable.get_inner().version;
+    }
+
+    assert(selected_versions["b"] == 1);
+    assert(selected_versions["d"] == 1);
+    assert(selected_versions["e"] == 1);
+    assert(selected_versions["f"] == 1);
+    assert(selected_versions.find("a") == selected_versions.end());
+    assert(selected_versions.find("c") == selected_versions.end());
+}
+
+void test_union_empty_requirements() {
+    auto provider = BundleBoxProvider::from_packages({{{"a"}, 1, std::vector<std::string>{"b 1 | c"}},
+                                                      {{"b"}, 1, std::vector<std::string>()}});
+    auto pool = provider.pool;
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
+    auto [solved, err] = solver.solve(provider.requirements({"a"}));
+
+    assert(!err.has_value());
+    assert(solved.size() == 2);
+
+    std::unordered_map<std::string, uint32_t> selected_versions;
+    for (const auto &solvable_id: solved) {
+        auto solvable = pool->resolve_solvable(solvable_id);
+        selected_versions[pool->resolve_package_name(solvable.get_name_id())] = solvable.get_inner().version;
+    }
+
+    assert(selected_versions["a"] == 1);
+    assert(selected_versions["b"] == 1);
+    assert(selected_versions.find("c") == selected_versions.end());
 }
 
 void test_unsat_locked_and_excluded() {
@@ -747,14 +912,68 @@ void test_indenter_with_multiple_siblings() {
     assert(indenter.get_indent() == "   │        ├─ ");
 }
 
+void test_repeated_solve_and_independent_conflict_graphs() {
+    auto provider = BundleBoxProvider::from_packages({{{"a"}, 1, {}}, {{"a"}, 2, {}}});
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(provider);
+    auto [first, first_error] = solver.solve(provider.requirements({"a 1"}));
+    assert(!first_error && first.size() == 1);
+    auto [second, second_error] = solver.solve(provider.requirements({"a 2"}));
+    assert(!second_error && second.size() == 1 && first[0] != second[0]);
+    auto [missing, missing_error] = solver.solve(provider.requirements({"missing"}));
+    assert(missing_error && missing.empty());
+    auto conflict = std::get<UnsolvableOrCancelled::Unsolvable>(*missing_error).conflict;
+    auto graph_one = solver.graph(conflict);
+    auto graph_two = solver.graph(conflict);
+    assert(graph_one && graph_two);
+    assert((DisplayUnsat<Range<Pack>, std::string>(provider.pool, *graph_one).to_string() ==
+            DisplayUnsat<Range<Pack>, std::string>(provider.pool, *graph_two).to_string()));
+    auto [last, last_error] = solver.solve(provider.requirements({"a 1"}));
+    assert(!last_error && last == first);
+}
+
+void test_arena_iterator_reference_lifetime() {
+    Arena<SolvableId, std::string> arena;
+    for (size_t i = 0; i < 130; ++i) { arena.alloc(std::to_string(i)); }
+    auto iter = arena.iter();
+    auto first = iter.next();
+    assert(first && &first->second == &arena[SolvableId::from_usize(0)]);
+    while (iter.has_next()) {
+        auto value = iter.next();
+        assert(value && value->second == std::to_string(value->first.to_usize()));
+    }
+    assert(first->second == "0");
+}
+
+void test_unsat_locked_and_root_constraint_diagnostics() {
+    auto provider = BundleBoxProvider::from_packages({{{"a"}, 1, {}}, {{"a"}, 2, {}}});
+    provider.set_locked("a", 1);
+    auto error = solve_unsat(provider, {"a 2"});
+    assert(error.find("is locked") != std::string::npos);
+
+    auto unconstrained = BundleBoxProvider::from_packages({{{"a"}, 1, {}}, {{"a"}, 2, {}}});
+    auto solver = Solver<Range<Pack>, std::string, BundleBoxProvider>(unconstrained);
+    auto [selected, failure] = solver.solve(Problem().requirements(unconstrained.requirements({"a 2"}))
+        .constraints(unconstrained.version_sets({"a 1"})));
+    assert(failure && selected.empty());
+    auto conflict = std::get<UnsolvableOrCancelled::Unsolvable>(*failure).conflict;
+    auto graph = solver.graph(conflict);
+    assert(graph);
+    auto message = DisplayUnsat<Range<Pack>, std::string>(unconstrained.pool, *graph).to_string();
+    assert(message.find("incompatible") != std::string::npos);
+}
+
 int main(int argc, char *argv[]) {
 
+    test_unsat_locked_and_root_constraint_diagnostics();
+    test_arena_iterator_reference_lifetime();
+    test_repeated_solve_and_independent_conflict_graphs();
     test_literal_satisfying_value();
     test_literal_eval();
     test_unlink_clause_different();
     test_unlink_clause_same();
     test_requires_with_and_without_conflict();
     test_constrains_with_and_without_conflict();
+    test_decision_tracker_undo_until_zero_clears_state();
 
     test_unit_propagation_1();
     test_unit_propagation_nested();
@@ -763,12 +982,17 @@ int main(int argc, char *argv[]) {
     test_resolve_with_nonexisting();
     test_resolve_with_nested_deps();
     test_resolve_with_unknown_deps();
-//    test_resolve_and_cancel();
+    test_resolve_and_cancel();
     test_resolve_locked_and_top_level();
     test_resolve_ignored_locked_top_level();
     test_resolve_favor_without_conflict();
     test_resolve_favor_with_conflict();
     test_resolve_cyclic();
+    test_explicit_root_requirements();
+    test_problem_with_constraints();
+    test_problem_with_soft_requirements();
+    test_resolve_union_requirements();
+    test_union_empty_requirements();
     test_unsat_locked_and_excluded();
     test_unsat_no_candidates_for_child_1();
     test_unsat_no_candidates_for_child_2();
@@ -800,4 +1024,3 @@ int main(int argc, char *argv[]) {
 //    test_indenter_with_multiple_siblings();
     return 0;
 }
-

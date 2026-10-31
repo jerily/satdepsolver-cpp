@@ -1,6 +1,8 @@
 #ifndef PROBLEM_H
 #define PROBLEM_H
 
+#include "DisplaySolvable.h"
+#include "DisplayVersionSet.h"
 #include <iostream>
 #include <utility>
 #include <vector>
@@ -12,6 +14,9 @@
 #include <deque>
 #include "internal/ClauseId.h"
 #include "internal/SolvableId.h"
+#include "internal/StringId.h"
+#include "internal/VersionSetId.h"
+#include "Common.h"
 
 typedef uint32_t NodeIndex;
 typedef uint32_t EdgeIndex;
@@ -51,7 +56,7 @@ using ConflictCauseVariant = std::variant<ConflictCause::Locked, ConflictCause::
 namespace ProblemEdge {
     // The target node is a candidate for the dependency specified by the version set
     struct Requires {
-        VersionSetId version_set_id;
+        Requirement requirement;
     };
     // The target node is involved in a conflict, caused by `conflict_cause`
     struct Conflict {
@@ -69,11 +74,10 @@ using ProblemEdgeVariant = std::variant<ProblemEdge::Requires, ProblemEdge::Conf
 // - They all have the same name
 // - They all have the same predecessor nodes
 // - They all have the same successor nodes
+// - Corresponding edges have the same requirements
 struct MergedProblemNode {
     std::vector<SolvableId> ids;
 };
-
-static uint32_t node_count = 0;
 
 template<typename P>
 class Node {
@@ -81,7 +85,7 @@ private:
     NodeIndex id;
     P payload;
 public:
-    explicit Node(P payload) : payload(payload), id(node_count++) {}
+    Node(P payload, NodeIndex node_id) : id(node_id), payload(std::move(payload)) {}
 
     P get_payload() const {
         return payload;
@@ -105,8 +109,6 @@ namespace std {
 };
 }
 
-static uint32_t edge_count = 0;
-
 template<typename P, typename W>
 class Edge {
 private:
@@ -115,8 +117,8 @@ private:
     Node<P> node_to;
     W weight;
 public:
-    Edge(Node<P> node_from, Node<P> node_to, W weight) : node_from(node_from), node_to(node_to), weight(weight),
-                                                         id(edge_count++) {}
+    Edge(Node<P> node_from, Node<P> node_to, W weight, EdgeIndex edge_id)
+        : id(edge_id), node_from(node_from), node_to(node_to), weight(std::move(weight)) {}
 
     Node<P> get_node_from() const {
         return node_from;
@@ -156,13 +158,13 @@ public:
     std::vector<Edge<P, W>> edges;
 
     NodeIndex add_node(P payload) {
-        Node<P> node(payload);
+        Node<P> node(payload, static_cast<NodeIndex>(nodes.size()));
         nodes.push_back(node);
         return node.get_id();
     }
 
     void add_edge(Node<P> node_from, Node<P> node_to, W weight) {
-        edges.push_back(Edge<P, W>({node_from, node_to, weight}));
+        edges.push_back(Edge<P, W>(node_from, node_to, weight, static_cast<EdgeIndex>(edges.size())));
     }
 
     uint32_t node_count() {
@@ -314,24 +316,28 @@ public:
     }
 };
 
-using MapKeyType = std::tuple<NameId, std::vector<NodeIndex>, std::vector<NodeIndex>>;
+// Include the requirement on each edge: identical neighbours alone do not
+// make versions with distinct dependency ranges interchangeable in diagnostics.
+using MergeEdge = std::pair<std::optional<Requirement>, NodeIndex>;
+using MapKeyType = std::tuple<NameId, std::vector<MergeEdge>, std::vector<MergeEdge>>;
 using MapValueType = std::vector<std::pair<NodeIndex, SolvableId>>;
 
-// add hash function for KeyType
 struct MapKeyTypeHash {
     std::size_t operator()(const MapKeyType &key) const {
-        auto [name, predecessors, successors] = key;
+        const auto& [name, predecessors, successors] = key;
         std::size_t hash = std::hash<NameId>{}(name);
-        for (auto &predecessor: predecessors) {
-            hash ^= std::hash<NodeIndex>{}(predecessor) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        }
-        for (auto &successor: successors) {
-            hash ^= std::hash<NodeIndex>{}(successor) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        }
+        auto combine = [&hash](const MergeEdge& edge) {
+            auto value = std::hash<NodeIndex>{}(edge.second);
+            if (edge.first) {
+                value ^= std::hash<Requirement>{}(*edge.first) + 0x9e3779b9;
+            }
+            hash ^= value + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        };
+        for (const auto& edge : predecessors) { combine(edge); }
+        for (const auto& edge : successors) { combine(edge); }
         return hash;
     }
 };
-
 
 // Graph representation of [`Problem`]
 //
@@ -389,41 +395,25 @@ public:
 
             auto candidate = optional_candidate.value();
 
-            //let predecessors: Vec<_> = graph
-            //                .edges_directed(node_id, Direction::Incoming)
-            //                .map(|e| e.source())
-            //                .sorted_unstable()
-            //                .collect();
-
-            auto predecessors_edges = graph.incoming_edges(node.get_id());
-            auto predecessors = std::vector<NodeIndex>();
-            for (auto& edge: predecessors_edges) {
-                predecessors.push_back(edge.get_node_from().get_id());
+            auto edge_requirement = [](const auto& edge) -> std::optional<Requirement> {
+                const auto weight = edge.get_weight();
+                if (const auto* requires = std::get_if<ProblemEdge::Requires>(&weight)) {
+                    return requires->requirement;
+                }
+                return std::nullopt;
+            };
+            std::vector<MergeEdge> predecessors;
+            for (const auto& edge : graph.incoming_edges(node.get_id())) {
+                predecessors.emplace_back(edge_requirement(edge), edge.get_node_from().get_id());
             }
             std::sort(predecessors.begin(), predecessors.end());
 
-            //            let successors: Vec<_> = graph
-            //                .edges(node_id)
-            //                .map(|e| e.target())
-            //                .sorted_unstable()
-            //                .collect();
-
-            auto successors_edges = graph.outgoing_edges(node.get_id());
-            auto successors = std::vector<NodeIndex>();
-            for (auto& edge: successors_edges) {
-                successors.push_back(edge.get_node_to().get_id());
+            std::vector<MergeEdge> successors;
+            for (const auto& edge : graph.outgoing_edges(node.get_id())) {
+                successors.emplace_back(edge_requirement(edge), edge.get_node_to().get_id());
             }
             std::sort(successors.begin(), successors.end());
-
-            //            let name = pool.resolve_solvable(candidate).name;
-
             auto name = pool->resolve_solvable(candidate).get_name_id();
-
-            //            let entry = maybe_merge
-            //                .entry((name, predecessors, successors))
-            //                .or_insert(Vec::new());
-            //
-            //            entry.push((node_id, candidate));
 
             auto key = std::make_tuple(name, predecessors, successors);
             auto entry = maybe_merge.find(key);
@@ -524,17 +514,16 @@ public:
             //                })
             //                .chunk_by(|(&version_set_id, _)| version_set_id);
 
-            std::unordered_map<VersionSetId, std::vector<NodeIndex>> dependencies;
+            std::unordered_map<Requirement, std::vector<NodeIndex>> dependencies;
             for (auto &edge: graph.outgoing_edges(node_index)) {
                 if (std::holds_alternative<ProblemEdge::Requires>(edge.get_weight())) {
-
-                    auto version_set_id = std::get<ProblemEdge::Requires>(edge.get_weight()).version_set_id;
+                    auto requirement = std::get<ProblemEdge::Requires>(edge.get_weight()).requirement;
                     auto target_nx = edge.get_node_to().get_id();
 
-                    if (dependencies.find(version_set_id) == dependencies.end()) {
-                        dependencies.insert(std::pair(version_set_id, std::vector<NodeIndex>()));
+                    if (dependencies.find(requirement) == dependencies.end()) {
+                        dependencies.insert(std::pair(requirement, std::vector<NodeIndex>()));
                     }
-                    dependencies.at(version_set_id).push_back(target_nx);
+                    dependencies.at(requirement).push_back(target_nx);
                 } else {
                     throw std::runtime_error("Unexpected edge type");
                 }
@@ -548,7 +537,7 @@ public:
             //            }
 
             bool all_deps_installable = true;
-            for (const auto &[version_set_id, deps]: dependencies) {
+            for (const auto &[requirement, deps]: dependencies) {
                 bool found_installable = false;
                 for (auto &target: deps) {
                     if (installable.find(target) != installable.end()) {
@@ -605,15 +594,15 @@ public:
             }
 
             // Edges grouped by dependency
-            std::unordered_map<VersionSetId, std::vector<NodeIndex>> dependencies;
+            std::unordered_map<Requirement, std::vector<NodeIndex>> dependencies;
             for (auto &edge: graph.outgoing_edges(node_index)) {
                 if (std::holds_alternative<ProblemEdge::Requires>(edge.get_weight())) {
-                    auto version_set_id = std::get<ProblemEdge::Requires>(edge.get_weight()).version_set_id;
+                    auto requirement = std::get<ProblemEdge::Requires>(edge.get_weight()).requirement;
                     auto target_nx = edge.get_node_to().get_id();
-                    if (dependencies.find(version_set_id) == dependencies.end()) {
-                        dependencies.insert(std::pair(version_set_id, std::vector<NodeIndex>()));
+                    if (dependencies.find(requirement) == dependencies.end()) {
+                        dependencies.insert(std::pair(requirement, std::vector<NodeIndex>()));
                     }
-                    dependencies.at(version_set_id).push_back(target_nx);
+                    dependencies.at(requirement).push_back(target_nx);
                 }
             }
 
@@ -623,7 +612,7 @@ public:
             //                .any(|(_, mut deps)| deps.all(|(_, target)| missing.contains(&target)))
 
             bool found_missing = false;
-            for (auto &[version_set_id, deps]: dependencies) {
+            for (auto &[requirement, deps]: dependencies) {
 
                 bool all_deps_missing = true;
                 for (auto &target: deps) {
@@ -734,8 +723,7 @@ public:
                     using T = std::decay_t<decltype(arg)>;
                     if constexpr (std::is_same_v<T, ProblemEdge::Requires>) {
                         auto T_arg = std::any_cast<ProblemEdge::Requires>(arg);
-                        auto display_vs = DisplayVersionSet<VS, N>(pool, pool->resolve_version_set(T_arg.version_set_id));
-                        return display_vs.to_string();
+                        return display_requirement(pool, T_arg.requirement);
                     } else if constexpr (std::is_same_v<T, ProblemEdge::Conflict>) {
                         auto T_arg = std::any_cast<ProblemEdge::Conflict>(arg);
                         auto conflict_cause = T_arg.conflict_cause;
@@ -898,11 +886,11 @@ public:
     }
 };
 
-class Problem {
+class Conflict {
 public:
     std::vector<ClauseId> clauses;
 
-    Problem() = default;
+    Conflict() = default;
 
     void add_clause(const ClauseId &clauseId) {
         if (std::find(clauses.cbegin(), clauses.cend(), clauseId) == clauses.cend()) {
@@ -922,10 +910,5 @@ public:
 
 };
 
-
-void reset_problem_count() {
-    node_count = 0;
-    edge_count = 0;
-}
 
 #endif // PROBLEM_H

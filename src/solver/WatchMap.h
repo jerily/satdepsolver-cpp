@@ -50,11 +50,8 @@ public:
 
         // Set the new watch
         clause.watched_literals_[watch_index] = new_watch;
-        auto optional_new_watch_clause_id = map.get(new_watch);
-        if (!optional_new_watch_clause_id.has_value()) {
-            throw std::runtime_error("linking to unknown solvable");
-        }
-        clause.link_to_clause(watch_index, optional_new_watch_clause_id.value());
+        auto new_watch_clause_id = map.get(new_watch).value_or(ClauseId::null());
+        clause.link_to_clause(watch_index, new_watch_clause_id);
         map.insert(new_watch, clause_id);
     }
 

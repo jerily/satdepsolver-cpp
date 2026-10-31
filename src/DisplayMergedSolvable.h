@@ -2,6 +2,7 @@
 #define DISPLAY_MERGED_SOLVABLE_H
 
 #include <sstream>
+#include <unordered_set>
 #include "Solvable.h"
 #include "Pool.h"
 #include "solver/Clause.h"
@@ -36,13 +37,17 @@ public:
 
         // join the version sets with "|"
         bool first = true;
+        std::unordered_set<std::string> displayed;
         for (const auto &vs : version_records) {
+            std::ostringstream text;
+            text << vs;
+            if (!displayed.insert(text.str()).second) { continue; }
             if (!first) {
                 oss << " | ";
             } else {
                 first = false;
             }
-            oss << vs;
+            oss << text.str();
         }
         return oss.str();
     }
